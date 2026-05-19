@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>逐日训练器｜12周计划</title>
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<header>
+  <h1>逐日训练器｜按你这份 12 周计划生成</h1>
+  <div class="sub">本地保存：训练日志、上次重量、e1RM、计划顺延都会存在浏览器 localStorage。建议用同一个浏览器打开。</div>
+</header>
+<div class="wrap">
+  <select id="mobileTabSelect" class="mobileTabSelect" onchange="showTab(this.value)">
+    <option value="today">今日训练</option>
+    <option value="calendar">日历/顺延</option>
+    <option value="history">训练记录</option>
+    <option value="settings">参数设置</option>
+    <option value="rmcalc">RM换算</option>
+    <option value="importer">导入适配</option>
+  </select>
+  <button type="button" id="mobileTabGo" class="mobileTabGo" onclick="forceMobileNav()">进入所选页面</button>
+  <div class="tabs" id="topTabs">
+    <button type="button" class="tab primary" data-tab="today" onclick="showTab('today')">今日训练</button>
+    <button type="button" class="tab" data-tab="calendar" onclick="showTab('calendar')">日历/顺延</button>
+    <button type="button" class="tab" data-tab="history" onclick="showTab('history')">训练记录</button>
+    <button type="button" class="tab" data-tab="settings" onclick="showTab('settings')">参数设置</button>
+    <button type="button" class="tab" data-tab="rmcalc" onclick="showTab('rmcalc')">RM换算</button>
+    <button type="button" class="tab" data-tab="importer" onclick="showTab('importer')">导入适配</button>
+  </div>
+
+  <section id="today" class="grid">
+    <div class="card">
+      <div class="row between">
+        <div>
+          <div class="small" id="dateLine"></div>
+          <div class="title" id="workoutTitle"></div>
+          <div class="row" id="badges"></div>
+          <div class="row" style="margin-top:8px">
+            <label class="small">本次训练标注日期 <input type="date" id="actualDate" onchange="anchorCurrentDate()"></label>
+            <button class="blue" onclick="anchorCurrentDate()">按此日期顺延后续</button>
+            <button class="bad" onclick="outdoorNoTrainingToday()">今日外出无训练</button>
+          </div>
+        </div>
+        <div class="row todayMoveTools">
+          <button type="button" onclick="prevWorkout()">上一练</button>
+          <button type="button" onclick="nextWorkout()">下一练</button>
+          <button type="button" class="blue" onclick="moveCurrentTraining(-1)">← 当前练前移</button>
+          <button type="button" class="primary" onclick="moveCurrentTraining(1)">当前练后推 →</button>
+        </div>
+      </div>
+      <div id="restNotice" class="small"></div>
+      <div id="moduleMap" class="moduleMap"></div>
+      <div class="collapsePanel" id="warmupPanel">
+        <div class="collapseHead" onclick="toggleWarmupPanel()">
+          <div>
+            <h3>热身 / 功能退阶</h3>
+            <div class="small">练完热身后可以收起，减少页面占用。</div>
+          </div>
+          <button type="button" id="warmupToggleBtn" onclick="event.stopPropagation();toggleWarmupPanel();">收起</button>
+        </div>
+        <div class="collapseBody" id="warmupCollapseBody">
+          <div class="small" id="warmupPurpose"></div>
+          <textarea id="warmupInput" placeholder="可自己输入热身/退阶动作。例：
+猫牛 2×10 休息30秒
+弹力带外旋 2×15 30s
+空杠卧推 2×10 休息45秒" oninput="autoSaveWarmupDraft()"></textarea>
+          <div class="row" style="margin-top:8px">
+            <button class="blue" onclick="parseAndRenderWarmups(true)">自动识别为热身项目</button>
+            <button class="primary" onclick="addWarmupProject()">手动添加项目</button>
+            <button onclick="openTemplatePicker()">调用热身模板</button>
+            <button onclick="loadDefaultWarmup()">恢复当前默认模板</button>
+            <button onclick="openSaveTemplateModal()">保存为模板</button>
+          </div>
+          <div class="small" style="margin-top:6px">规则：支持“猫牛 2×10 休息30秒 / 弹力带外旋2x15 30s”。识别后仍可手动改名称、重量、次数、余力、组数和休息时间。</div>
+          <div id="warmupExercises"></div>
+          <div class="bottomAdd row"><button class="primary" onclick="addWarmupProject()">＋在热身底部添加训练模块</button><button class="blue" onclick="openWarmupActionTemplatePicker()">调用热身动作模板</button></div>
+          <div class="warmupBottomCollapse"><button type="button" onclick="toggleWarmupPanel()">收起整个热身 / 功能退阶</button></div>
+          <pre id="warmupBox" class="hidden"></pre>
+        </div>
+      </div>
+      <h3>训练动作</h3>
+      <div id="exercises"></div>
+      <div class="bottomAdd row"><button class="primary" onclick="addMainProject()">＋在训练底部添加训练模块</button><button class="blue" onclick="openExerciseTemplatePicker()">调用训练动作模板</button><button onclick="saveAllMainCardsAsTemplates()">保存当前全部动作为模板</button></div>
+      <label class="small">今日备注 / 体感</label>
+      <textarea id="sessionNote" placeholder="比如：睡眠差、膝盖感觉、肩胛卡顿、今天状态..."></textarea>
+      <div class="row finishUnified" style="margin-top:10px">
+        <button class="ok" onclick="finishWorkoutCompleteBackup()">完成今日训练｜进入下一练｜同步备份</button>
+        <button class="blue" onclick="saveProgress()">只保存，不完成</button>
+        <button class="bad" onclick="skipWorkout()">今天不练，顺延</button>
+      </div>
+      <div class="exportPanel">
+        <h3>完成 / 备份</h3>
+        <div class="small">点完成后会同步做三件事：保存本次训练日志、进入下一练、生成周期备份文件。备份文件可用于以后重新导入恢复。</div>
+        <div class="row" style="margin-top:8px">
+          <button onclick="previewCurrentBrief()">预览本次简章</button>
+          <button onclick="exportCycleBackup()">手动导出周期备份</button>
+          <button onclick="document.getElementById('backupImportFile').click()">导入周期备份</button>
+        </div>
+        <div class="small" style="margin-top:6px">备份内容会不断叠加训练日期与日志；iPhone 浏览器通常不能无提示覆盖同一个本地文件，会生成/保存最新备份。导入最新备份即可恢复整个周期。</div>
+        <input id="backupImportFile" type="file" accept="application/json,.json" class="hidden" onchange="importCycleBackupFile(event)">
+        <pre id="briefPreview" class="hidden"></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>组间歇计时器</h3>
+      <div class="timer" id="timer">03:00</div>
+      <div class="row timerControls">
+        <button onclick="setTimer(45)">45秒</button><button onclick="setTimer(90)">90秒</button><button onclick="setTimer(120)">2分</button><button onclick="setTimer(180)">3分</button><button onclick="setTimer(300)">5分</button>
+      </div>
+      <div class="row timerControls" style="margin-top:8px">
+        <button class="primary" onclick="startTimer()">开始</button><button onclick="pauseTimer()">暂停</button><button onclick="resetTimer()">重置</button><button onclick="notifyPermission()">开启提醒</button>
+      </div>
+      <hr style="border-color:var(--line);border-width:0 0 1px;margin:14px 0">
+      <h3>上次表现 / RM 参考</h3>
+      <div id="lastBox" class="small"></div>
+      <div class="kpi" style="margin-top:10px">
+        <div><span class="small">本次总组数</span><b id="kpiSets">0</b></div>
+        <div><span class="small">估算总量</span><b id="kpiVol">0</b></div>
+        <div><span class="small">最高 e1RM</span><b id="kpiE1rm">0</b></div>
+      </div>
+      <p class="small">e1RM 默认用 Epley：重量×(1+次数/30)。RIR/余力只作为记录，不强行修正。</p>
+    </div>
+  </section>
+
+  <section id="calendar" class="hidden">
+    <div class="card calendarCard">
+      <div class="calendarSticky simpleCalHead">
+        <div class="row between">
+          <h3>训练队列</h3>
+          <div class="row calendarTools"><button onclick="goCurrentPending()">跳到当前应练</button><button onclick="rebuild()">刷新</button><button class="bad" onclick="clearDateAnchors()">清空日期修正</button></div>
+        </div>
+        <div class="simpleSelectedPanel">
+          <div id="selectedCalInfo">未选中训练日</div>
+          <div class="row selectedDateTools" style="margin-top:8px">
+            <label class="small">选中训练标注日期 <input type="date" id="selectedActualDate"></label>
+            <button type="button" class="blue" onclick="anchorSelectedDate()">按选中日期顺推后续</button>
+          </div>
+          <div class="row calendarShiftTools" style="margin-top:8px">
+            <button type="button" class="blue" onclick="moveSelectedTraining(-1)">← 选中训练前移</button>
+            <button type="button" class="primary" onclick="moveSelectedTraining(1)">选中训练后推 →</button>
+          </div>
+          <div class="row" style="margin-top:8px"><button type="button" class="primary" onclick="enterSelectedTraining()">进入选中训练页面</button></div>
+        </div>
+        <div class="calendarLegend">
+          <span class="legendItem calUpperA">上肢A</span><span class="legendItem calUpperB">上肢B</span><span class="legendItem calLowerA">下肢A</span><span class="legendItem calLowerB">下肢B</span><span class="legendItem calTech">技术/硬拉</span><span class="legendItem calRest">休息/恢复</span>
+        </div>
+        <div class="small" id="calendarHint"></div>
+      </div>
+      <div class="simpleCalList" id="cal"></div>
+    </div>
+  </section>
+
+  <section id="history" class="hidden">
+    <div class="card">
+      <div class="row between"><h3>训练记录</h3><div class="row"><button onclick="exportData()">导出JSON</button><button class="bad" onclick="clearLogs()">清空记录</button></div></div>
+      <div id="historyTable"></div>
+    </div>
+  </section>
+
+  <section id="settings" class="hidden">
+    <div class="card">
+      <h3>参数设置</h3>
+      <div class="row">
+        <label>计划起始日 <input type="date" id="startDate"></label>
+        <label>当前训练序号 <input type="number" id="currentIndex" min="0" max="81"></label>
+        <label>默认主项休息秒 <input type="number" id="mainRest" value="180"></label>
+        <label>默认辅助休息秒 <input type="number" id="assistRest" value="90"></label>
+      </div>
+      <p class="small">如果前几天没练，不需要改日期；训练器以“未完成的下一练”为准，完成一次才推进一次。想强行换成推/拉/腿，可以在今日训练按上一练/下一练，或改当前训练序号。</p>
+      <button class="primary" onclick="saveSettings()">保存设置</button>
+    </div>
+  </section>
+
+  <section id="rmcalc" class="hidden">
+    <div class="card">
+      <h3>RM换算计算器</h3>
+      <p class="small">逻辑：先把“完成次数 + 余力/RIR”视为接近力竭次数，再用 Epley 估算。例：100kg × 5次，余力2，按 7RM 估算 1RM。</p>
+      <div class="calcBlock">
+        <h4>① 根据本次表现估算 1RM</h4>
+        <div class="row compactCalc">
+          <label>动作名称<input id="rmMove" placeholder="例：常规硬拉"></label>
+          <label>重量 kg<input id="rmWeight" type="number" inputmode="decimal" placeholder="100"></label>
+          <label>完成次数<input id="rmReps" type="number" inputmode="numeric" placeholder="5"></label>
+          <label>余力/RIR<input id="rmRir" inputmode="decimal" placeholder="2 或 2-3"></label>
+        </div>
+        <div class="row" style="margin-top:8px"><button class="primary" onclick="calcOneRM()">计算1RM</button><button onclick="copyRmToTarget()">把结果填到下方1RM</button></div>
+        <div id="rmResult" class="resultBox">结果会显示在这里</div>
+      </div>
+      <div class="calcBlock">
+        <h4>② 已知 1RM，反推目标训练重量</h4>
+        <div class="row compactCalc">
+          <label>1RM kg<input id="targetOneRm" type="number" inputmode="decimal" placeholder="120"></label>
+          <label>目标次数<input id="targetReps" type="number" inputmode="numeric" placeholder="5"></label>
+          <label>目标余力/RIR<input id="targetRir" inputmode="decimal" placeholder="2"></label>
+          <label>取整单位 kg<input id="roundStep" type="number" inputmode="decimal" value="2.5"></label>
+        </div>
+        <div class="row" style="margin-top:8px"><button class="primary" onclick="calcTargetWeight()">计算目标重量</button></div>
+        <div id="targetResult" class="resultBox">结果会显示在这里</div>
+      </div>
+      <p class="small">备注：这是训练规划用的估算，不是测试极限。余力区间如 2-3 会取中间值 2.5；取整单位 2.5kg 适合杠铃片，1kg 适合哑铃/器械。</p>
+    </div>
+  </section>
+
+  <section id="importer" class="hidden">
+    <div class="card">
+      <h3>导入适配</h3>
+      <p class="small">推荐：直接选择 .xlsx 文件。支持：① 12周训练内容总表；② 徐晖版/肖悦版「手机查看版_一日一格」；③ 逐日执行类表格。会优先读取一日一格的“今天整块内容”，自动跳过导航页。文件只在本机浏览器读取，不上传。</p>
+      <div class="row" style="margin-top:10px">
+        <label class="primary" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+          选择 Excel 文件
+          <input id="excelFileInput" type="file" accept=".xlsx,.xls,.csv,.tsv" onchange="importExcelFile(this.files && this.files[0])" style="display:none">
+        </label>
+        <button onclick="previewImportPlan()">预览文本区</button>
+        <button class="ok" onclick="applyImportPlan()">应用导入计划</button>
+        <button class="bad" onclick="resetImportedPlan()">恢复内置计划</button>
+      </div>
+      <div id="fileImportStatus" class="small" style="margin-top:8px">尚未选择文件。</div>
+      <p class="small" style="margin-top:12px">备用方式：如果文件选择在某个浏览器失效，可以把 Excel 内容复制到下面文本区再预览。</p>
+      <textarea id="importBox" placeholder="这里是备用粘贴区。正常情况下你不用复制粘贴，直接点上面的选择 Excel 文件。"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button onclick="fillImportHintA()">填入格式A示例</button>
+        <button onclick="fillImportHintB()">填入格式B示例</button>
+        <button onclick="clearImportBox()">清空</button>
+      </div>
+      <pre id="importPreview" style="margin-top:10px">尚未预览。</pre>
+    </div>
+  </section>
+
+</div>
+
+<div id="saveTemplateModal" class="modalMask">
+  <div class="modalPanel">
+    <h3>保存热身/退阶模板</h3>
+    <label class="small">模板名称</label>
+    <input id="tplNameInput" placeholder="例：腿部热身、足背屈热身、胸训肩胛热身">
+    <label class="small" style="margin-top:8px;display:block">训练分类</label>
+    <select id="tplCategoryInput">
+      <option value="腿训">腿训</option>
+      <option value="胸训">胸训</option>
+      <option value="通用">通用</option>
+      <option value="足背屈">足背屈</option>
+      <option value="肩胛/胸椎">肩胛/胸椎</option>
+      <option value="自定义">自定义</option>
+    </select>
+    <label class="small" style="margin-top:8px;display:block">备注/说明，可空</label>
+    <textarea id="tplNoteInput" placeholder="例：深蹲前使用；踝关节活动受限时使用"></textarea>
+    <div class="templatePreview" id="tplPreviewBox" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" onclick="confirmSaveTemplate()">确认保存</button>
+      <button onclick="closeTemplateModals()">取消</button>
+    </div>
+  </div>
+</div>
+<div id="templatePickerModal" class="modalMask">
+  <div class="modalPanel">
+    <div class="row between">
+      <h3>调用热身/退阶模板</h3>
+      <button onclick="closeTemplateModals()">关闭</button>
+    </div>
+    <label class="small">筛选分类</label>
+    <select id="tplFilter" onchange="renderTemplatePickerList()">
+      <option value="全部">全部</option>
+      <option value="腿训">腿训</option>
+      <option value="胸训">胸训</option>
+      <option value="通用">通用</option>
+      <option value="足背屈">足背屈</option>
+      <option value="肩胛/胸椎">肩胛/胸椎</option>
+      <option value="自定义">自定义</option>
+    </select>
+    <div id="templateList"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<div id="floatingNote" class="floatingNote collapsed">
+  <div class="floatingNoteHead" onclick="toggleFloatingNote()">
+    <span class="floatingNoteTitleText">本次训练记录</span><span>记录</span><span class="floatingNoteMoveHint">小浮窗</span>
+    <button id="floatingNoteBtn" onclick="event.stopPropagation();toggleFloatingNote()">展开</button>
+  </div>
+  <div class="floatingNoteBody">
+    <textarea id="floatingSessionNote" placeholder="训练中随手记：疼痛、卡顿、状态、下次调整……" oninput="saveFloatingNote()"></textarea>
+    <div class="noteMiniTools">
+      <button type="button" onclick="keepFloatingNoteForNext()">保留到下一练</button>
+      <button type="button" class="bad" onclick="clearFloatingNoteDraft()">清空本次记录</button>
+    </div>
+    <div class="noteArchiveHint">完成训练时会自动归档到训练日志/总存档；是否保留到下一练由你手动选择。</div>
+  </div>
+</div>
+
+<div id="exerciseTemplateModal" class="modalMask">
+  <div class="modalPanel">
+    <div class="row between">
+      <h3>调用训练动作模板</h3>
+      <button type="button" onclick="closeExerciseTemplateModal()">关闭</button>
+    </div>
+    <div class="small">选择后会添加到当前训练底部；如果是从动作卡片点“切换动作”，则会替换当前动作。动作名称会作为重量记录追踪框架。</div>
+    <div class="templateControls">
+      <input id="exerciseTemplateSearch" placeholder="搜索动作：卧推 / 划船 / 深蹲..." oninput="renderExerciseTemplateList()">
+      <select id="exerciseTemplateCategory" onchange="renderExerciseTemplateList()">
+        <option value="全部">全部部位</option>
+        <option value="胸">胸</option>
+        <option value="肩">肩</option>
+        <option value="背">背</option>
+        <option value="腿">腿</option>
+        <option value="臀腿">臀腿</option>
+        <option value="后链/硬拉">后链/硬拉</option>
+        <option value="核心">核心</option>
+        <option value="手臂">手臂</option>
+        <option value="通用">通用</option>
+      </select>
+    </div>
+    <div id="exerciseTemplateList"></div>
+  </div>
+</div>
+
+<div id="warmupActionTemplateModal" class="modalMask">
+  <div class="modalPanel">
+    <div class="row between">
+      <h3>调用热身动作模板</h3>
+      <button type="button" onclick="closeWarmupActionTemplateModal()">关闭</button>
+    </div>
+    <div class="small">用于添加或替换单个热身/退阶动作；和整套热身模板不同，这里保存的是“一个动作框架”。</div>
+    <div class="templateControls">
+      <input id="warmupActionTemplateSearch" placeholder="搜索热身：踝 / 肩胛 / 外旋..." oninput="renderWarmupActionTemplateList()">
+      <select id="warmupActionTemplateCategory" onchange="renderWarmupActionTemplateList()">
+        <option value="全部">全部分类</option>
+        <option value="足踝">足踝</option>
+        <option value="髋">髋</option>
+        <option value="胸椎">胸椎</option>
+        <option value="肩胛">肩胛</option>
+        <option value="肩袖">肩袖</option>
+        <option value="核心">核心</option>
+        <option value="下肢">下肢</option>
+        <option value="上肢">上肢</option>
+        <option value="通用">通用</option>
+      </select>
+    </div>
+    <div id="warmupActionTemplateList"></div>
+  </div>
+</div>
+<div id="timerToast" class="timerToast"></div>
+<div id="timerConfirmMask" class="timerConfirmMask"><div class="timerConfirmBox"><h3 id="timerConfirmTitle">倒计时结束</h3><p id="timerConfirmBody">可以开始下一步。</p><button type="button" onclick="closeTimerConfirm()">确认</button></div></div>
+
+<script src="storage.js"></script>
+<script src="templates.js"></script>
+<script src="parser.js"></script>
+<script src="importer.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

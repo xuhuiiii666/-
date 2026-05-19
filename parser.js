@@ -1,0 +1,173 @@
+const TRAINING_SECTION_TITLES = ['功能/热身','功能模块','热身','主项','主辅助','正式训练','主训练','辅助','康复/辅助','康复辅助','核心','有氧','恢复','休息','执行','可选恢复'];
+const WARMUP_SECTION_TITLES = ['功能/热身','功能模块','热身'];
+const MAIN_SECTION_TITLES = ['主项','主辅助','正式训练','主训练','辅助','康复/辅助','康复辅助','核心','有氧','执行'];
+const RECOVERY_SECTION_TITLES = ['恢复','休息','可选恢复'];
+
+function normalizeParserText(value){
+  return String(value || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[–—～~]/g, '-')
+    .replace(/[×＊*]/g, 'x')
+    .replace(/\u00a0/g, ' ')
+    .trim();
+}
+
+function normalizeExerciseName(name){
+  return String(name || '')
+    .replace(/^[\s\-•]+/, '')
+    .replace(/^\d+[\.\)、)]\s*/, '')
+    .replace(/(?:休息|休|间歇|每次休息)\s*[:：]?\s*\d{1,3}(?:\s*[-至]\s*\d{1,3})?\s*(?:秒|s|sec|分钟|min)?/i, '')
+    .replace(/[｜|]\s*(?:余力|RIR|建议重量|建议|休息|休|间歇)[:：]?.*$/i, '')
+    .replace(/（\s*(?:余力|RIR|建议重量|休息|休)[^）]*）/gi, '')
+    .replace(/\(\s*(?:余力|RIR|建议重量|休息|休)[^\)]*\)/gi, '')
+    .replace(/\d{1,2}\s*(?:组\s*)?x\s*[\d\-.]+(?:\s*(?:次呼吸|次|秒|s|sec|分钟|min|呼吸))?(?:\/侧)?/i, '')
+    .replace(/\d{1,3}\s*(?:秒|s|sec)(?:\/侧)?(?:\s*x\s*\d{1,2})?/i, '')
+    .replace(/\d{1,2}\s*组/i, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[，,；;｜|]+$/g, '')
+    .trim();
+}
+
+function parseRestSeconds(value){
+  var text = normalizeParserText(value);
+  var match = text.match(/(?:休息|休|间歇|每次休息)\s*[:：]?\s*(\d{1,3})(?:\s*[-至]\s*(\d{1,3}))?\s*(秒|s|sec|分钟|min)?/i);
+  if(!match) return null;
+  var unit = match[3] || '秒';
+  var min = parseInt(match[1], 10) || 0;
+  var max = parseInt(match[2] || match[1], 10) || min;
+  if(/分钟|min/i.test(unit)){ min *= 60; max *= 60; }
+  return {min:min, max:max, def:min, raw:(max !== min ? min + '-' + max + '秒' : min + '秒')};
+}
+
+function parseExerciseLine(line){
+  var raw = String(line || '').trim();
+  var text = normalizeParserText(raw);
+  var clean = text.replace(/^\d+[\.\)、)]\s*/, '').replace(/^[\-•]\s*/, '').trim();
+  if(!clean || /^【.+】$/.test(clean) || /^观察[:：]|^重点[:：]|^节奏[:：]|^今日目标/.test(clean)){
+    return {name:'', raw:raw, line:raw, valid:false};
+  }
+
+  var result = {
+    name:'',
+    raw:raw,
+    line:raw,
+    valid:true,
+    sets:1,
+    reps:'',
+    rir:'',
+    suggestedWeight:'',
+    rest:null,
+    duration:'',
+    perSide:/\/侧|每侧|单侧/.test(clean)
+  };
+
+  var structuredParts = clean.split(/[｜|]/).map(function(x){return x.trim();}).filter(Boolean);
+  if(structuredParts.length > 1){
+    result.name = normalizeExerciseName(structuredParts[0]) || structuredParts[0];
+    for(var sp=0; sp<structuredParts.length; sp++){
+      var part = structuredParts[sp];
+      var setsOnly = part.match(/^(\d{1,2})\s*组$/);
+      if(setsOnly) result.sets = parseInt(setsOnly[1], 10) || result.sets;
+      var repsOnly = part.match(/^([\d.]+(?:\s*[-至]\s*[\d.]+)?)\s*(?:次|reps?)?(?:\/侧)?$/i);
+      if(repsOnly && !/kg|秒|s|分钟|min|休|余力|RIR/i.test(part)) result.reps = repsOnly[1].replace(/\s+/g, '');
+      var partDuration = part.match(/^(\d{1,3})\s*(秒|s|sec)(?:\/侧)?$/i);
+      if(partDuration){ result.duration = parseInt(partDuration[1], 10) || result.duration; result.reps = ''; }
+      var partRir = part.match(/(?:余力|RIR)\s*[:：]?\s*([\d.]+(?:\s*[-至]\s*[\d.]+)?)/i);
+      if(partRir) result.rir = partRir[1].replace(/\s+/g, '');
+      var partWeight = part.match(/(?:建议重量|建议)\s*[:：]?\s*([\d.]+)\s*(kg|公斤|lb|磅)?/i);
+      if(partWeight) result.suggestedWeight = partWeight[1] + (partWeight[2] || 'kg');
+      var partRest = parseRestSeconds(part);
+      if(partRest) result.rest = partRest;
+      var partSetRep = part.match(/(\d{1,2})\s*(?:组\s*)?x\s*([\d.]+(?:\s*[-至]\s*[\d.]+)?)(?:\s*(?:次|reps?))?(?:\/侧)?/i);
+      if(partSetRep){ result.sets = parseInt(partSetRep[1], 10) || result.sets; result.reps = partSetRep[2].replace(/\s+/g, ''); }
+    }
+    result.valid = !!result.name;
+    return result;
+  }
+
+  var rir = clean.match(/(?:余力|RIR)\s*[:：]?\s*([\d.]+(?:\s*[-至]\s*[\d.]+)?)/i);
+  if(rir) result.rir = rir[1].replace(/\s+/g, '');
+
+  var weight = clean.match(/(?:建议重量|建议)\s*[:：]?\s*([\d.]+)\s*(kg|公斤|lb|磅)?/i);
+  if(weight) result.suggestedWeight = weight[1] + (weight[2] || 'kg');
+
+  result.rest = parseRestSeconds(clean);
+
+  var withoutRest = clean.replace(/(?:休息|休|间歇|每次休息)\s*[:：]?\s*\d{1,3}(?:\s*[-至]\s*\d{1,3})?\s*(?:秒|s|sec|分钟|min)?/ig, '');
+  var setRep = withoutRest.match(/(\d{1,2})\s*(?:组\s*)?x\s*([\d.]+(?:\s*[-至]\s*[\d.]+)?)(?:\s*(?:次|reps?))?(?:\/侧)?/i);
+  if(setRep){
+    result.sets = parseInt(setRep[1], 10) || 1;
+    result.reps = setRep[2].replace(/\s+/g, '');
+  }
+
+  var timeWithSets = withoutRest.match(/(?:(\d{1,2})\s*(?:组\s*)?x\s*)?(\d{1,3})\s*(秒|s|sec)(?:\/侧)?(?:\s*x\s*(\d{1,2}))?/i);
+  if(timeWithSets && (!setRep || /秒|s|sec/i.test(timeWithSets[3]))){
+    if(timeWithSets[1]) result.sets = parseInt(timeWithSets[1], 10) || result.sets;
+    if(timeWithSets[4]) result.sets = parseInt(timeWithSets[4], 10) || result.sets;
+    result.duration = parseInt(timeWithSets[2], 10) || '';
+    result.reps = '';
+  }
+
+  var minuteDuration = withoutRest.match(/(\d{1,2})\s*分钟(?:\/侧)?/);
+  if(minuteDuration && !result.duration){
+    result.duration = (parseInt(minuteDuration[1], 10) || 0) * 60;
+    result.reps = '';
+  }
+
+  result.name = normalizeExerciseName(clean);
+  if(!result.name) result.name = clean.split(/[｜|]/)[0].trim();
+  if(!result.name) result.valid = false;
+  return result;
+}
+
+function formatParsedExerciseLine(parsed, mode){
+  if(!parsed || !parsed.valid || !parsed.name) return '';
+  var sets = parsed.sets || 1;
+  if(mode === 'warm'){
+    if(parsed.duration) return parsed.name + ' ' + parsed.duration + 'sx' + sets + (parsed.rest ? ' 休息' + parsed.rest.def + '秒' : '');
+    return parsed.name + ' ' + sets + 'x' + (parsed.reps || '') + (parsed.rest ? ' 休息' + parsed.rest.def + '秒' : '');
+  }
+  var out = parsed.name + ' ' + sets + 'x' + (parsed.reps || '');
+  if(parsed.duration) out = parsed.name + ' ' + parsed.duration + 'sx' + sets;
+  if(parsed.rir) out += '（余力' + parsed.rir + '）';
+  if(parsed.suggestedWeight) out += '｜建议重量' + parsed.suggestedWeight;
+  if(parsed.rest) out += '｜休息：' + parsed.rest.raw;
+  return out.trim();
+}
+
+function classifyTrainingDay(day){
+  day = day || {};
+  var title = String(day['训练主题'] || day.theme || '');
+  var type = String(day['类型'] || day.type || '');
+  var stage = String(day['阶段'] || day.stage || '');
+  var label = String(day['今天练哪天'] || day.label || '');
+  var content = String(day['训练内容（组×次数/余力）'] || day.content || '');
+  var firstLine = (content.split(/\n|\|/)[0] || '');
+  var t = [title, type, stage, label, firstLine].join(' ');
+
+  if(/休息日|完全休息|恢复日|恢复\s*$|休息\/轻活动|轻活动|轻有氧|Zone\s*2|有氧恢复/.test(t)) return {kind:'休息', cls:'calRest', label:'休息/恢复'};
+  if(/硬拉|后链|髋铰链|拉\+髋铰链|技术/.test(t)) return {kind:'后链/硬拉', cls:'calTech', label:'技术/硬拉'};
+  if(/下肢A|深蹲主导|前蹲主导|前蹲|深蹲/.test(t)) return {kind:'下肢A', cls:'calLowerA', label:'下肢A'};
+  if(/下肢B|单腿|臀腿|臀推|后侧/.test(t)) return {kind:'下肢B', cls:'calLowerB', label:'下肢B'};
+  if(/上肢A|卧推主导|推胸|胸肩/.test(t)) return {kind:'上肢A', cls:'calUpperA', label:'上肢A'};
+  if(/上肢B|变式卧推|肩背|肩背手臂|背宽/.test(t)) return {kind:'上肢B', cls:'calUpperB', label:'上肢B'};
+  if(/上肢|卧推|下拉|划船|肩/.test(t)) return {kind:'上肢', cls:'calUpperA', label:'上肢'};
+  if(/下肢|腿|臀/.test(t)) return {kind:'下肢', cls:'calLowerA', label:'下肢'};
+  return {kind:'训练', cls:'calOther', label:'训练'};
+}
+
+function classifyExerciseTemplate(exercise){
+  var name = String((exercise && (exercise.name || exercise.trackName || exercise.line)) || '');
+  var text = name.toLowerCase();
+  var category = '通用';
+  if(/卧推|推胸|飞鸟|夹胸|俯卧撑|胸/.test(text)) category = '胸';
+  else if(/推举|侧平举|前平举|面拉|face|landmine|肩/.test(text)) category = '肩';
+  else if(/划船|下拉|引体|背|pull|row|lat/.test(text)) category = '背';
+  else if(/硬拉|rdl|罗马尼亚|臀桥|臀推|山羊|后链|good morning/.test(text)) category = '后链/硬拉';
+  else if(/深蹲|腿举|腿弯举|腿屈伸|登阶|分腿蹲|箭步|提踵|前蹲|背蹲|高脚杯|泽奇|箱式/.test(text)) category = '腿';
+  else if(/臀|髋外展|蚌式/.test(text)) category = '臀腿';
+  else if(/死虫|卷腹|支撑|平板|核心|抗旋|pallof|哥本哈根/.test(text)) category = '核心';
+  else if(/弯举|三头|二头|臂屈伸|下压|手臂/.test(text)) category = '手臂';
+  return {category:category, kind:category};
+}
