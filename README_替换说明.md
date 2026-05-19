@@ -30,6 +30,8 @@ const KEY='xuhui_training_v2_dailygrid';
 
 原来的本地存档就会继续读取。
 
+这版新增了 `actualDates` / `actualDate` 字段，用来锁定“实际训练发生日期”。旧日志只有 `date` 字段时，会自动补一份 `actualDate`，不会删除旧字段。
+
 ## 上传前建议
 
 在旧页面里先点一次「总存档导出」或「导出周期备份」，留一个 JSON 备份。这个不是因为替换会清空，而是防止浏览器、手机系统或 GitHub Pages 缓存带来的意外。
@@ -47,4 +49,3 @@ const KEY='xuhui_training_v2_dailygrid';
 ```text
 https://xuhuiiii666.github.io/-/?v=20260520
 ```
-

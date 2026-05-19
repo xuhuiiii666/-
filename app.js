@@ -7,6 +7,7 @@ if(state.currentIndex===undefined) state.currentIndex=0;
 if(!state.startDate) state.startDate = new Date().toISOString().slice(0,10);
 if(!state.settings) state.settings={mainRest:180,assistRest:90};
 if(!state.dateAnchors) state.dateAnchors={}; // 训练序号 -> 实际标注日期。后续日期会从最近锚点继续顺延。
+if(!state.actualDates) state.actualDates={}; // 训练序号 -> 实际训练发生日期；一旦写入就优先显示和归档。
 if(!state.customWarmups) state.customWarmups={}; // 按训练目的保存：胸训/腿训/通用
 if(state.selectedCalendarIndex===undefined) state.selectedCalendarIndex=state.currentIndex||0;
 if(state.quickNote===undefined) state.quickNote='';
@@ -19,6 +20,7 @@ try{
   if(Array.isArray(importedPlan) && importedPlan.length){ PLAN = importedPlan; }
   if(Array.isArray(importedWarmups) && importedWarmups.length){ WARMUPS = importedWarmups; }
 }catch(e){}
+try{ if(ensureDateMigration()) saveState(); }catch(e){}
 let activeSet = null, timerLeft=180, timerBase=180, timerId=null;
 let rowTimers = {}; // 每一组都能独立显示自己的倒计时；实际同时只跑一个，避免训练时多个铃同时响。
 let activeTimerContext = null; // 用真实结束时间校准，切出手机后回来不丢时间。
@@ -136,18 +138,100 @@ function parseExercises(text){
 }
 function getWorkout(){return PLAN[Math.max(0,Math.min(state.currentIndex,PLAN.length-1))];}
 function addDays(dateStr,days){let d=new Date(dateStr+'T00:00:00');d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);}
-function effectiveDateFor(index){
+function localDateString(d){
+  d=d||new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function plannedDateFor(index){
+  var w=PLAN[Math.max(0,Math.min(PLAN.length-1,Number(index)||0))]||{};
+  return w.plannedDate || w['plannedDate'] || w['日期'] || w.date || '';
+}
+function displayDateLabel(dateStr){
+  var d=dateStr?new Date(String(dateStr).replace(/\//g,'-')+'T00:00:00'):new Date();
+  if(isNaN(d.getTime())) d=new Date();
+  return (d.getMonth()+1)+'月'+d.getDate()+'日';
+}
+function ensureDateMigration(){
+  state.actualDates=state.actualDates||{};
   state.dateAnchors=state.dateAnchors||{};
-  let anchors=Object.keys(state.dateAnchors).map(Number).filter(n=>!Number.isNaN(n)&&n<=index).sort((a,b)=>b-a);
-  if(anchors.length){let a=anchors[0];return addDays(state.dateAnchors[a], index-a);}
+  state.logs=state.logs||[];
+  var changed=false;
+  state.logs.forEach(function(log){
+    if(log && !log.actualDate && log.date){ log.actualDate=log.date; changed=true; }
+    if(log && typeof log.planIndex==='number' && log.actualDate && !state.actualDates[log.planIndex]){
+      state.actualDates[log.planIndex]=log.actualDate; changed=true;
+    }
+  });
+  if(!state.lastActualDate){
+    var keys=Object.keys(state.actualDates).filter(function(k){return state.actualDates[k];});
+    if(keys.length){
+      keys.sort(function(a,b){
+        var da=String(state.actualDates[a]||''), db=String(state.actualDates[b]||'');
+        if(da===db) return Number(b)-Number(a);
+        return db.localeCompare(da);
+      });
+      state.lastActualIndex=Number(keys[0]);
+      state.lastActualDate=state.actualDates[keys[0]];
+      changed=true;
+    }
+  }
+  return changed;
+}
+function actualDateFor(index){
+  state.actualDates=state.actualDates||{};
+  var v=state.actualDates[index];
+  return v || '';
+}
+function scheduledDateFor(index){
+  index=Math.max(0,Math.min(PLAN.length-1,Number(index)||0));
+  state.actualDates=state.actualDates||{};
+  state.dateAnchors=state.dateAnchors||{};
+  if(state.actualDates[index]) return state.actualDates[index];
+
+  if(state.lastActualDate && Number.isFinite(Number(state.lastActualIndex)) && index>Number(state.lastActualIndex)){
+    var cur=String(state.lastActualDate);
+    for(var p=Number(state.lastActualIndex)+1;p<=index;p++){
+      if(state.actualDates[p]){
+        if(String(state.actualDates[p])>cur) cur=state.actualDates[p];
+      }else{
+        cur=addDays(cur,1);
+      }
+    }
+    return cur;
+  }
+
+  var source=Object.assign({}, state.dateAnchors||{}, state.actualDates||{});
+  var anchors=Object.keys(source).map(Number).filter(function(n){return !Number.isNaN(n)&&n<=index;}).sort(function(a,b){return b-a;});
+  if(anchors.length){var a=anchors[0];return addDays(source[a], index-a);}
+  if(plannedDateFor(index)) return plannedDateFor(index);
   return addDays(state.startDate,index);
+}
+function effectiveDateFor(index){
+  return actualDateFor(index) || scheduledDateFor(index) || plannedDateFor(index) || addDays(state.startDate,index);
+}
+function markActualTrainingDate(index,dateStr,opts){
+  opts=opts||{};
+  index=Math.max(0,Math.min(PLAN.length-1,Number(index)||0));
+  var date=dateStr || localDateString();
+  state.actualDates=state.actualDates||{};
+  state.actualDates[index]=date;
+  state.dateAnchors=state.dateAnchors||{};
+  state.dateAnchors[index]=date; // 兼容旧字段：旧 UI/旧备份仍可读。
+  state.lastActualIndex=index;
+  state.lastActualDate=date;
+  if(!opts.noSave) saveState();
+  var inp=document.getElementById('actualDate'); if(inp && index===state.currentIndex) inp.value=date;
+  return date;
+}
+function markCurrentTrainingToday(opts){
+  return markActualTrainingDate(state.currentIndex, localDateString(), opts);
 }
 function anchorCurrentDate(){
   let inp=document.getElementById('actualDate'); if(!inp||!inp.value) return;
-  state.dateAnchors=state.dateAnchors||{}; state.dateAnchors[state.currentIndex]=inp.value;
+  markActualTrainingDate(state.currentIndex, inp.value, {noSave:true});
   saveState(); renderCalendar();
   let w=getWorkout();
-  document.getElementById('dateLine').textContent = `训练序号 ${state.currentIndex+1}/${PLAN.length}｜标注日期 ${effectiveDateFor(state.currentIndex)}｜原计划 ${w['日期']} ${w['星期']}`;
+  document.getElementById('dateLine').textContent = `训练序号 ${state.currentIndex+1}/${PLAN.length}｜实际日期 ${effectiveDateFor(state.currentIndex)}｜原计划 ${plannedDateFor(state.currentIndex)} ${w['星期']||''}`;
 }
 
 function anchorSelectedDate(){
@@ -155,8 +239,7 @@ function anchorSelectedDate(){
   if(!inp || !inp.value){ alert('先选择一个日期。'); return; }
   var selected=(state.selectedCalendarIndex===undefined?state.currentIndex:state.selectedCalendarIndex);
   selected=Math.max(0,Math.min(PLAN.length-1,Number(selected)||0));
-  state.dateAnchors=state.dateAnchors||{};
-  state.dateAnchors[selected]=inp.value;
+  markActualTrainingDate(selected, inp.value, {noSave:true});
   saveState();
   renderCalendar();
   setTimeout(function(){ scrollCalendarToIndex(selected); },60);
@@ -175,7 +258,7 @@ function scrollCalendarToCurrent(){
   scrollCalendarToIndex(Math.max(0,Math.min(PLAN.length-1,Number(idx)||0)));
 }
 
-function clearDateAnchors(){if(confirm('确认清空所有手动标注日期？训练序号不会改变，只恢复从起始日连续排列。')){state.dateAnchors={};saveState();rebuild();renderCalendar();}}
+function clearDateAnchors(){if(confirm('确认清空手动排期日期？已实际训练过的 actualDate 会保留，不会清掉训练日志日期。')){state.dateAnchors={};Object.keys(state.actualDates||{}).forEach(function(k){state.dateAnchors[k]=state.actualDates[k];});saveState();rebuild();renderCalendar();}}
 function warmupFor(name){let w=WARMUPS.find(x=>x.name===name);return w? w.steps+"\n\n备注："+w.notes : '休息日：散步、轻拉伸、足弓激活即可。';}
 function workoutPurpose(w){
   let t=((w&&w['训练主题'])||'')+' '+((w&&w['热身模板'])||'')+' '+((w&&w['训练内容（组×次数/余力）'])||'');
@@ -268,7 +351,7 @@ function parseAndRenderWarmups(showAlert){
   let items=parseWarmupItems(box.value); let html='';
   items.forEach((ex,ei)=>{html+=warmupCardHTML(ex,ei);});
   document.getElementById('warmupExercises').innerHTML=html || '<pre>暂无热身项目。可以点“手动添加项目”。</pre>';
-  document.querySelectorAll('#warmupExercises input').forEach(i=>i.addEventListener('input', updateKpis));
+  bindTrainingDataInputs(document);
   renderModuleMap();
   if(showAlert) alert('已识别为 '+items.length+' 个热身/退阶项目；现在可以继续手动改。');
   return items;
@@ -280,7 +363,7 @@ function addWarmupProject(){
   let ei=wrap.querySelectorAll('.warmCard').length;
   wrap.insertAdjacentHTML('beforeend', warmupCardHTML({name:'',line:'手动新增',sets:1,reps:'',rest:30,duration:''},ei));
   document.querySelectorAll('#warmupExercises input').forEach(i=>i.removeEventListener('input', updateKpis));
-  document.querySelectorAll('#warmupExercises input').forEach(i=>i.addEventListener('input', updateKpis));
+  bindTrainingDataInputs(document);
   renderModuleMap();
 }
 function addWarmupSet(btn){
@@ -289,7 +372,7 @@ function addWarmupSet(btn){
   let n=sets.querySelectorAll('.warmSet').length+1;
   sets.insertAdjacentHTML('beforeend', warmupSetHTML(ei,n,'',30,''));
   renumberSetRows(sets);
-  sets.querySelectorAll('input').forEach(i=>i.addEventListener('input', updateKpis));
+  bindTrainingDataInputs(document);
 }
 function duplicateWarmupSet(btn){
   let card=btn.closest('.warmCard'), sets=card.querySelector('.warmSets');
@@ -301,7 +384,7 @@ function duplicateWarmupSet(btn){
   let n=sets.querySelectorAll('.warmSet').length+1;
   sets.insertAdjacentHTML('beforeend', warmupSetHTML(ei,n,reps,rest,duration));
   renumberSetRows(sets);
-  sets.querySelectorAll('input').forEach(i=>i.addEventListener('input', updateKpis));
+  bindTrainingDataInputs(document);
 }
 function renumberSetRows(scope){
   var rows=scope?Array.prototype.slice.call(scope.querySelectorAll('.setrow')):[];
@@ -421,7 +504,7 @@ function renderWarmupItemsFromTemplate(items){
       var dt=row.querySelector('.actionTimer'); if(dt) dt.textContent=st.duration?fmt(parseInt(st.duration)): '--:--';
     });
   });
-  document.querySelectorAll('#warmupExercises input').forEach(function(i){i.addEventListener('input', updateKpis);});
+  bindTrainingDataInputs(document);
 }
 function applyWarmupTemplate(id){
   var tpl=ensureWarmupTemplates().find(function(t){return t.id===id;}); if(!tpl) return;
@@ -579,7 +662,7 @@ function addMainProject(){
   var wrap=document.getElementById('exercises'); if(!wrap) return;
   var n=wrap.querySelectorAll('.mainCard').length;
   wrap.insertAdjacentHTML('beforeend', mainCardHTML({name:'自定义训练模块',line:'手动新增',sets:1,reps:'',rir:''},n,getWorkout(),true));
-  document.querySelectorAll('#exercises input').forEach(function(i){i.addEventListener('input', updateKpis);});
+  bindTrainingDataInputs(document);
   renderModuleMap();
 }
 function addMainSet(btn){
@@ -590,12 +673,14 @@ function addMainSet(btn){
   var reps=card.getAttribute('data-plan-reps')||'';
   var rir=card.getAttribute('data-plan-rir')||'';
   sets.insertAdjacentHTML('beforeend', mainSetHTML(ei,n,reps,rir,{min:60,max:240,def:120,label:custom?'自定':'辅助'},'',custom,n)); renumberSetRows(sets);
+  bindTrainingDataInputs(document);
 }
 function duplicateMainSet(btn){
   var card=btn.closest('.mainCard'), sets=card.querySelector('.mainSets'); var last=sets.querySelector('.setrow:last-child'); if(!last){addMainSet(btn);return;}
   var get=function(sel){var x=last.querySelector(sel);return x?x.value:''}; var rest=last.querySelector('input[type=range]');
   var custom=card.hasAttribute('data-custom-main'); var ei=[].slice.call(document.querySelectorAll('#exercises .mainCard')).indexOf(card); var n=sets.querySelectorAll('.setrow').length+1;
   sets.insertAdjacentHTML('beforeend', mainSetHTML(ei,n,get('[data-field="reps"]'),get('[data-field="rir"]'),{min:60,max:240,def:parseInt(rest?rest.value:120),label:custom?'自定':'辅助'},get('[data-field="duration"]'),custom,n)); renumberSetRows(sets);
+  bindTrainingDataInputs(document);
 }
 function removeMainProject(btn){ var card=btn.closest('.mainCard'); if(card)card.remove(); updateKpis(); renderModuleMap(); }
 
@@ -697,7 +782,7 @@ function switchExerciseTemplate(id){
       var dt=row.querySelector('.actionTimer'); if(dt) dt.textContent=st.duration?fmt(parseInt(st.duration)): '--:--';
     });
   }
-  document.querySelectorAll('#exercises input,#exercises select').forEach(function(i){i.addEventListener('input', updateKpis);});
+  bindTrainingDataInputs(document);
   clearExerciseTemplateSwitchTarget(); closeExerciseTemplateModal(); renderModuleMap(); updateKpis(); saveState();
 }
 
@@ -744,7 +829,7 @@ function applyExerciseTemplate(id){
       var dt=row.querySelector('.actionTimer'); if(dt) dt.textContent=st.duration?fmt(parseInt(st.duration)): '--:--';
     });
   }
-  document.querySelectorAll('#exercises input,#exercises select').forEach(function(i){i.addEventListener('input', updateKpis);});
+  bindTrainingDataInputs(document);
   closeExerciseTemplateModal(); renderModuleMap(); updateKpis();
 }
 function renameExerciseTemplate(id){
@@ -891,7 +976,8 @@ function updateRestValue(id,val){
 function rebuild(){
   autoSeedTemplatesFromPlan();
   let w=getWorkout(); let exs=parseExercises(w['训练内容（组×次数/余力）']);
-  document.getElementById('dateLine').textContent = `训练序号 ${state.currentIndex+1}/${PLAN.length}｜标注日期 ${effectiveDateFor(state.currentIndex)}｜原计划 ${w['日期']} ${w['星期']}`;
+  var actual=actualDateFor(state.currentIndex), scheduled=scheduledDateFor(state.currentIndex), planned=plannedDateFor(state.currentIndex);
+  document.getElementById('dateLine').textContent = `训练序号 ${state.currentIndex+1}/${PLAN.length}｜${actual?'实际日期':'队列日期'} ${actual||scheduled}｜原计划 ${planned||'-'} ${w['星期']||''}`;
   let actualDateInput=document.getElementById('actualDate'); if(actualDateInput) actualDateInput.value=effectiveDateFor(state.currentIndex);
   document.getElementById('workoutTitle').textContent = w['训练主题'];
   document.getElementById('badges').innerHTML = `<span class="pill stage">${w['阶段']}</span><span class="pill">第${w['周次']}周</span><span class="pill">${w['热身模板']}</span>`;
@@ -905,7 +991,7 @@ function rebuild(){
   var html='';
   exs.forEach(function(ex,ei){ html+=mainCardHTML(ex,ei,w,false); });
   document.getElementById('exercises').innerHTML=html || '<pre>休息/轻活动：今天不需要正式训练。</pre>';
-  document.querySelectorAll('#exercises input, #exercises select[data-field="unit"], #warmupExercises input, #warmupExercises select[data-field="unit"]').forEach(i=>i.addEventListener('input', updateKpis));
+  bindTrainingDataInputs(document);
   renderModuleMap();
   updateKpis(); renderLast(exs); renderTimer();
 }
@@ -928,6 +1014,25 @@ function displayWeight(value,unit){
   return String(value)+(unit==='lb'?'lb':'kg');
 }
 function getRowFromWeightInput(inp){ return inp.closest ? inp.closest('.setrow') : inp.parentElement; }
+function isTrainingDataField(el){
+  if(!el) return false;
+  var f=el.getAttribute && el.getAttribute('data-field');
+  return /^(weight|reps|rir|duration|unit|mainName|warmName|moduleNote)$/.test(f||'');
+}
+function handleTrainingDataInput(ev){
+  if(ev && ev.target && isTrainingDataField(ev.target)){
+    markCurrentTrainingToday({noSave:true});
+    saveState();
+  }
+  updateKpis();
+}
+function bindTrainingDataInputs(scope){
+  scope=scope||document;
+  scope.querySelectorAll('#exercises input, #exercises select, #exercises textarea, #warmupExercises input, #warmupExercises select, #warmupExercises textarea').forEach(function(i){
+    i.addEventListener('input', handleTrainingDataInput);
+    i.addEventListener('change', handleTrainingDataInput);
+  });
+}
 
 function updateKpis(){
   let sets=0,vol=0,best=0;
@@ -1076,12 +1181,12 @@ function initFloatingNoteDrag(){
   window.addEventListener('resize',function(){setTimeout(clampFloatingNote,80);});
 }
 
-function saveProgress(){ anchorCurrentDate(); autoSaveWarmupDraft(); syncFloatingNote(); state.draftNote=document.getElementById('sessionNote').value; saveState(); alert('已保存当前输入、热身项目和日期修正。');}
+function saveProgress(){ markCurrentTrainingToday({noSave:true}); autoSaveWarmupDraft(); syncFloatingNote(); state.draftNote=document.getElementById('sessionNote').value; saveState(); alert('已保存当前输入、热身项目和实际训练日期。');}
 function finishWorkout(){
-  anchorCurrentDate();
+  markCurrentTrainingToday({noSave:true});
   let w=getWorkout(); let entries=collectEntries();
-  let logDate=effectiveDateFor(state.currentIndex);
-  var logObj={date:logDate, planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], note:document.getElementById('sessionNote').value, entries};
+  let logDate=actualDateFor(state.currentIndex) || localDateString();
+  var logObj={date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:'已完成', note:document.getElementById('sessionNote').value, entries};
   state.logs.push(logObj); archiveSessionNote(logObj);
   state.completed = state.completed||{}; state.completed[state.currentIndex]=true;
   state.currentIndex=Math.min(state.currentIndex+1,PLAN.length-1);
@@ -1261,6 +1366,7 @@ function checkModuleComplete(card){
   }
 }
 function startRowTimer(id,forcedRest){
+  markCurrentTrainingToday({noSave:true});
   var row=document.getElementById('row_'+id);
   if(row){
     row.classList.add('done');
@@ -1279,6 +1385,7 @@ function startRowTimer(id,forcedRest){
   clearInterval(timerId);
   if(rowTimers[id]) rowTimers[id].endAt=Date.now()+sec*1000;
   activeTimerContext={type:'rest',id:id,endAt:Date.now()+sec*1000};
+  saveState();
   timerId=setInterval(tickRealTimer,1000);
   tickRealTimer();
 }
@@ -1335,6 +1442,7 @@ function bindCalendarTapHandlers(){
 function enterSelectedTraining(){
   var i=(state.selectedCalendarIndex===undefined?state.currentIndex:state.selectedCalendarIndex);
   state.currentIndex=Math.max(0,Math.min(PLAN.length-1,Number(i)||0));
+  markCurrentTrainingToday({noSave:true});
   saveState();
   showTab('today');
   rebuild();
@@ -1351,6 +1459,11 @@ function moveSelectedTraining(delta){
   if(b!==undefined) anchors[selected]=b; else delete anchors[selected];
   if(a!==undefined) anchors[target]=a; else delete anchors[target];
   state.dateAnchors=anchors;
+  var actuals=state.actualDates||{};
+  var aa=actuals[selected], bb=actuals[target];
+  if(bb!==undefined) actuals[selected]=bb; else delete actuals[selected];
+  if(aa!==undefined) actuals[target]=aa; else delete actuals[target];
+  state.actualDates=actuals;
   if(state.currentIndex===selected) state.currentIndex=target;
   else if(state.currentIndex===target) state.currentIndex=selected;
   state.selectedCalendarIndex=target;
@@ -1398,6 +1511,7 @@ function renderCalendar(){
   var html='';
   PLAN.forEach(function(w,i){
     var ds=effectiveDateFor(i);
+    var hasActual=!!actualDateFor(i);
     var theme=calendarThemeInfo(w)||{};
     var key=theme.cls||'calOther';
     if(!palette[key]) key='calOther';
@@ -1408,12 +1522,13 @@ function renderCalendar(){
     if(i===state.currentIndex) flags+='<span class="flag flagNow">当前</span>';
     if(i===selected) flags+='<span class="flag flagSel">选中</span>';
     if(done[i]) flags+='<span class="flag">已完成</span>';
-    if((state.dateAnchors||{})[i]) flags+='<span class="flag">日期锚点</span>';
+    if(hasActual) flags+='<span class="flag">实际训练</span>';
+    else if((state.dateAnchors||{})[i]) flags+='<span class="flag">排期锚点</span>';
     var bandStyle='background:'+pal.color+';color:'+pal.text+';';
     html+='<div class="'+cls+'" data-cal-index="'+i+'" onclick="return goCalendarDay('+i+', event)">'
       +'<div class="labelBand" style="'+bandStyle+'">'+pal.label+'</div>'
       +'<div class="labelBody">'
-      +'<div class="labelDate">'+ds.slice(5)+'｜#'+(i+1)+'</div>'
+      +'<div class="labelDate">'+ds.slice(5)+'｜#'+(i+1)+(hasActual?'｜实际':'｜队列')+'</div>'
       +'<div class="labelTitle">'+escapeHtml(w['训练主题']||'未命名训练')+'</div>'
       +'<div class="labelSub">'+escapeHtml(content||'点击选中，再进入训练。')+'</div>'
       +'<div class="labelFlags">'+flags+'</div>'
@@ -1427,16 +1542,16 @@ function renderCalendar(){
   var cal=document.getElementById('cal'); if(cal) cal.innerHTML=html;
   var sw=PLAN[selected]||{};
   var selectedInfo=document.getElementById('selectedCalInfo');
-  if(selectedInfo){ selectedInfo.innerHTML='<b>已选中：</b>#'+(selected+1)+'｜'+effectiveDateFor(selected)+'｜'+escapeHtml(sw['训练主题']||'未命名训练')+'<br><span class="small">在这里改日期：比如选中 #17，标注为 5月13日，则 #17 从 5月13日开始，后续 #18/#19 继续顺推。</span>'; }
+  if(selectedInfo){ selectedInfo.innerHTML='<b>已选中：</b>#'+(selected+1)+'｜'+effectiveDateFor(selected)+'｜'+escapeHtml(sw['训练主题']||'未命名训练')+'<br><span class="small">进入训练或填写记录后会自动把这一练标记为今天；已实际训练过的日期会锁定，后续未完成训练从最近一次实际训练日继续顺推。</span>'; }
   var sDate=document.getElementById('selectedActualDate'); if(sDate) sDate.value=effectiveDateFor(selected);
-  var anchors=Object.entries(state.dateAnchors||{}).sort(function(a,b){return Number(a[0])-Number(b[0])}).map(function(x){return '#'+(Number(x[0])+1)+'='+x[1]}).join('；') || '无';
+  var anchors=Object.entries(state.actualDates||{}).sort(function(a,b){return Number(a[0])-Number(b[0])}).map(function(x){return '#'+(Number(x[0])+1)+'='+x[1]}).join('；') || '无';
   var hint=document.getElementById('calendarHint');
-  if(hint) hint.textContent='文字标签版：每张卡顶部直接显示训练类型。黄色=当前应练，蓝色=当前选中。日期锚点：'+anchors;
+  if(hint) hint.textContent='文字标签版：每张卡顶部直接显示训练类型。黄色=当前应练，蓝色=当前选中。实际训练日期：'+anchors;
 }
 function renderHistory(){
   if(!state.logs.length){document.getElementById('historyTable').innerHTML='<p class="small">暂无训练记录。</p>';return}
-  let rows=[]; state.logs.slice().reverse().forEach(l=>{rows.push(`<tr><td>${l.date}</td><td>#${(l.planIndex??0)+1} ${l.title}</td><td>${l.entries.length}</td><td>${Math.round(l.entries.reduce((a,e)=>a+(parseFloat(e.weight)||0)*(parseFloat(e.reps)||0),0))}</td><td>${l.note||''}</td></tr>`)});
-  document.getElementById('historyTable').innerHTML=`<table><thead><tr><th>标注日期</th><th>训练</th><th>记录组数</th><th>总量</th><th>备注</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+  let rows=[]; state.logs.slice().sort(function(a,b){return String(b.actualDate||b.date||'').localeCompare(String(a.actualDate||a.date||''));}).forEach(l=>{var d=l.actualDate||l.date||'';rows.push(`<tr><td>${displayDateLabel(d)}</td><td>#${(l.planIndex??0)+1}</td><td>${escapeHtml(l.title||'')}</td><td>${escapeHtml(l.status||'已完成')}</td><td>${l.entries.length}</td><td>${Math.round(l.entries.reduce((a,e)=>a+(parseFloat(e.weight)||0)*(parseFloat(e.reps)||0),0))}</td><td>${escapeHtml(l.note||'')}</td></tr>`)});
+  document.getElementById('historyTable').innerHTML=`<table><thead><tr><th>实际日期</th><th>训练序号</th><th>训练标题</th><th>完成状态</th><th>记录组数</th><th>总量</th><th>备注</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
 }
 function renderSettings(){document.getElementById('startDate').value=state.startDate;document.getElementById('currentIndex').value=state.currentIndex;document.getElementById('mainRest').value=state.settings.mainRest;document.getElementById('assistRest').value=state.settings.assistRest;}
 function saveSettings(){state.startDate=document.getElementById('startDate').value;state.currentIndex=parseInt(document.getElementById('currentIndex').value)||0;state.settings.mainRest=parseInt(document.getElementById('mainRest').value)||180;state.settings.assistRest=parseInt(document.getElementById('assistRest').value)||90;saveState();rebuild();alert('设置已保存。');}
@@ -1507,13 +1622,13 @@ function initWarmupPanel(){
 
 
 function buildWorkoutLogFromCurrent(){
-  anchorCurrentDate();
+  markCurrentTrainingToday({noSave:true});
   autoSaveWarmupDraft();
   var w=getWorkout();
   var entries=collectEntries();
   var noteEl=document.getElementById('sessionNote');
-  var logDate=effectiveDateFor(state.currentIndex);
-  return {date:logDate, planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], note:noteEl?noteEl.value:'', entries:entries};
+  var logDate=actualDateFor(state.currentIndex) || localDateString();
+  return {date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:'已完成', note:noteEl?noteEl.value:'', entries:entries};
 }
 function pad2(n){return String(n).padStart(2,'0');}
 function formatEntryLine(e){
@@ -1609,8 +1724,8 @@ function getBackupFileName(refLog){
   var idx=state.currentIndex||0;
   if(refLog&&typeof refLog.planIndex==='number') idx=refLog.planIndex;
   plan=PLAN[idx]||{};
-  var dateStr=(refLog&&refLog.date)||plan.date||new Date().toISOString().slice(0,10);
-  var title=(refLog&&refLog.title)||plan.title||plan.theme||('第'+(idx+1)+'练');
+  var dateStr=(refLog&&(refLog.actualDate||refLog.date))||actualDateFor(idx)||localDateString();
+  var title=(refLog&&refLog.title)||plan['训练主题']||plan.title||plan.theme||('第'+(idx+1)+'练');
   return formatBackupDateForName(dateStr)+'-'+cleanFilePart(title)+'-（总存档）.json';
 }
 function downloadCycleBackupFile(silent,refLog){
@@ -1651,10 +1766,9 @@ function buildCycleBackupObject(){
   var importedPlan=null, importedWarmups=null;
   try{importedPlan=JSON.parse(localStorage.getItem(KEY+'_importedPlan')||'null');}catch(e){}
   try{importedWarmups=JSON.parse(localStorage.getItem(KEY+'_importedWarmups')||'null');}catch(e){}
-  return {version:2, exportedAt:new Date().toISOString(), app:'training-tracker', state:state, importedPlan:importedPlan, importedWarmups:importedWarmups};
+  return {version:3, exportedAt:new Date().toISOString(), app:'training-tracker', dateMode:'actualDate-first', state:state, importedPlan:importedPlan, importedWarmups:importedWarmups};
 }
 function exportCycleBackup(){
-  anchorCurrentDate();
   autoSaveWarmupDraft();
   state.draftNote=document.getElementById('sessionNote')?document.getElementById('sessionNote').value:'';
   state.lastBackupAt=new Date().toISOString();
@@ -1675,7 +1789,9 @@ function importCycleBackupFile(ev){
       if(!state.logs) state.logs=[];
       if(!state.completed) state.completed={};
       if(!state.dateAnchors) state.dateAnchors={};
+      if(!state.actualDates) state.actualDates={};
       if(!state.settings) state.settings={mainRest:180,assistRest:90};
+      ensureDateMigration();
       saveState();
       if(obj.importedPlan) localStorage.setItem(KEY+'_importedPlan', JSON.stringify(obj.importedPlan));
       if(obj.importedWarmups) localStorage.setItem(KEY+'_importedWarmups', JSON.stringify(obj.importedWarmups));
@@ -1689,7 +1805,7 @@ function importCycleBackupFile(ev){
 
 function goCurrentPending(){ state.selectedCalendarIndex=state.currentIndex; saveState(); renderCalendar(); setTimeout(function(){scrollCalendarToCurrent();},60); }
 function exportData(){let blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});let a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='training-log.json';a.click();}
-function clearLogs(){if(confirm('确认清空所有训练记录？')){state.logs=[];state.completed={};state.currentIndex=0;state.dateAnchors={};saveState();rebuild();renderHistory();}}
+function clearLogs(){if(confirm('确认清空所有训练记录？')){state.logs=[];state.completed={};state.currentIndex=0;state.dateAnchors={};state.actualDates={};state.lastActualIndex=null;state.lastActualDate='';saveState();rebuild();renderHistory();}}
 
 
 /* ===== 手机导航稳定版 + 训练日顺序移动 ===== */
@@ -1710,6 +1826,13 @@ function moveCurrentTraining(delta){
   var tmp = PLAN[i]; PLAN[i] = PLAN[j]; PLAN[j] = tmp;
   state.currentIndex = j; // 跟随“被移动的当前训练”一起移动，避免你不知道自己挪的是谁
   state.dateAnchors = state.dateAnchors || {};
+  var anchors=state.dateAnchors, a=anchors[i], b=anchors[j];
+  if(b!==undefined) anchors[i]=b; else delete anchors[i];
+  if(a!==undefined) anchors[j]=a; else delete anchors[j];
+  state.actualDates = state.actualDates || {};
+  var actuals=state.actualDates, aa=actuals[i], bb=actuals[j];
+  if(bb!==undefined) actuals[i]=bb; else delete actuals[i];
+  if(aa!==undefined) actuals[j]=aa; else delete actuals[j];
   persistCurrentPlanOrder();
   saveState();
   rebuild();
@@ -1720,6 +1843,14 @@ function promoteNextTrainingToToday(){
   var i=Math.max(0,Math.min(PLAN.length-1,state.currentIndex||0));
   if(i>=PLAN.length-1){ alert('后面没有下一练了。'); return; }
   var tmp=PLAN[i]; PLAN[i]=PLAN[i+1]; PLAN[i+1]=tmp;
+  state.dateAnchors=state.dateAnchors||{};
+  var a=state.dateAnchors[i], b=state.dateAnchors[i+1];
+  if(b!==undefined) state.dateAnchors[i]=b; else delete state.dateAnchors[i];
+  if(a!==undefined) state.dateAnchors[i+1]=a; else delete state.dateAnchors[i+1];
+  state.actualDates=state.actualDates||{};
+  var aa=state.actualDates[i], bb=state.actualDates[i+1];
+  if(bb!==undefined) state.actualDates[i]=bb; else delete state.actualDates[i];
+  if(aa!==undefined) state.actualDates[i+1]=aa; else delete state.actualDates[i+1];
   persistCurrentPlanOrder(); saveState(); rebuild(); renderCalendar();
   alert('已把下一练提前到今天，原本今天这一练顺延到下一位。');
 }
@@ -1873,8 +2004,7 @@ function refreshCalendarAndFocus(delay){
     var inp=document.getElementById('selectedActualDate');
     if(!inp || !inp.value){ alert('先选择一个日期。'); return; }
     var selected=getCalendarFocusIndex();
-    state.dateAnchors=state.dateAnchors||{};
-    state.dateAnchors[selected]=inp.value;
+    markActualTrainingDate(selected, inp.value, {noSave:true});
     saveState();
     refreshCalendarAndFocus(120);
   };

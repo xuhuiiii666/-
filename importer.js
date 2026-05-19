@@ -224,6 +224,7 @@ function importFormatA(rows, headerRow){
     plan.push({
       '周次': parseInt(cell(row,ixWeek),10)||'',
       '日期': cell(row,ixDate)||'',
+      'plannedDate': cell(row,ixDate)||'',
       '星期': cell(row,ixDay)||'',
       '阶段': cell(row,ixStage)||'导入计划',
       '训练主题': theme||('导入训练 '+(plan.length+1)),
@@ -285,6 +286,7 @@ function importFormatB(rows, headerRow){
     plan.push({
       '周次': parseInt(cell(row,ixWeek),10)||meta.week||'',
       '日期': '',
+      'plannedDate': '',
       '星期': cell(row,ixDay)||meta.weekday||'',
       '阶段': meta.stage||type,
       '类型': type,
@@ -450,7 +452,7 @@ function applyImportPlan(){
   if(lastImportPreview.warmups && lastImportPreview.warmups.length) WARMUPS=lastImportPreview.warmups;
   localStorage.setItem(KEY+'_importedPlan', JSON.stringify(PLAN));
   if(lastImportPreview.warmups && lastImportPreview.warmups.length) localStorage.setItem(KEY+'_importedWarmups', JSON.stringify(WARMUPS));
-  state.currentIndex=0; state.dateAnchors={}; saveState();
+  state.currentIndex=0; state.dateAnchors={}; state.actualDates={}; state.lastActualIndex=null; state.lastActualDate=''; saveState();
   autoSeedTemplatesFromPlan();
   rebuild();
   alert('已应用导入计划：'+lastImportPreview.plan.length+'天。');
