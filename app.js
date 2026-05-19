@@ -21,6 +21,7 @@ try{
   if(Array.isArray(importedWarmups) && importedWarmups.length){ WARMUPS = importedWarmups; }
 }catch(e){}
 try{ if(ensureDateMigration()) saveState(); }catch(e){}
+try{ if(dedupeTemplateLibraries()) saveState(); }catch(e){}
 let activeSet = null, timerLeft=180, timerBase=180, timerId=null;
 let rowTimers = {}; // 每一组都能独立显示自己的倒计时；实际同时只跑一个，避免训练时多个铃同时响。
 let activeTimerContext = null; // 用真实结束时间校准，切出手机后回来不丢时间。
@@ -51,14 +52,52 @@ function inferWarmupCategory(name){
   if(/卧推|推|拉|肩|背|胸/.test(n)) return '上肢';
   return '通用';
 }
-function normalizeTplName(x){return String(x||'').trim().replace(/\s+/g,' ');}
+function normalizeTemplateKey(x){
+  return String(x||'')
+    .trim()
+    .toLowerCase()
+    .replace(/[（）]/g,function(ch){return ch==='（'?'(':')';})
+    .replace(/\([^)]*\)/g,'')
+    .replace(/\s+/g,'')
+    .replace(/[　]/g,'')
+    .trim();
+}
+function normalizeTplName(x){return String(x||'').trim().replace(/[（）]/g,function(ch){return ch==='（'?'(':')';}).replace(/\s+/g,' ');}
 function exerciseTemplateExists(name){
-  var nn=normalizeTplName(name); if(!nn) return true;
-  return ensureExerciseTemplates().some(function(t){return normalizeTplName(t.trackName||t.name)===nn;});
+  var nn=normalizeTemplateKey(name); if(!nn) return true;
+  return ensureExerciseTemplates().some(function(t){return normalizeTemplateKey(t.trackName||t.name||t.originalName)===nn;});
 }
 function warmupActionTemplateExists(name){
-  var nn=normalizeTplName(name); if(!nn) return true;
-  return ensureWarmupActionTemplates().some(function(t){return normalizeTplName(t.name)===nn;});
+  var nn=normalizeTemplateKey(name); if(!nn) return true;
+  return ensureWarmupActionTemplates().some(function(t){return normalizeTemplateKey(t.name)===nn;});
+}
+function findExerciseTemplateByName(name){
+  var key=normalizeTemplateKey(name); if(!key) return null;
+  return ensureExerciseTemplates().find(function(t){return normalizeTemplateKey(t.trackName||t.name||t.originalName)===key;})||null;
+}
+function findWarmupActionTemplateByName(name){
+  var key=normalizeTemplateKey(name); if(!key) return null;
+  return ensureWarmupActionTemplates().find(function(t){return normalizeTemplateKey(t.name)===key;})||null;
+}
+function latestTemplateTime(t){
+  return Date.parse(t.updatedAt||t.createdAt||'') || 0;
+}
+function dedupeTemplateArray(arr,type){
+  var map={};
+  (arr||[]).forEach(function(t){
+    var key=normalizeTemplateKey(type==='warmup' ? t.name : (t.trackName||t.name||t.originalName));
+    if(!key) return;
+    if(!map[key] || latestTemplateTime(t)>=latestTemplateTime(map[key])) map[key]=t;
+  });
+  return Object.keys(map).map(function(k){return map[k];});
+}
+function dedupeTemplateLibraries(){
+  var changed=false;
+  var ex=dedupeTemplateArray(state.exerciseTemplates||[],'exercise');
+  var warm=dedupeTemplateArray(state.warmupActionTemplates||[],'warmup');
+  if((state.exerciseTemplates||[]).length!==ex.length){state.exerciseTemplates=ex; changed=true;}
+  if((state.warmupActionTemplates||[]).length!==warm.length){state.warmupActionTemplates=warm; changed=true;}
+  return changed;
 }
 
 function showTab(id){
@@ -332,10 +371,13 @@ function warmupSetHTML(ei,s,reps,rest,duration){
   </div>`;
 }
 function warmupCardHTML(ex,ei){
+  var exists=!!findWarmupActionTemplateByName(ex.name);
+  var saveCls=exists?' hidden':'';
+  var statusCls=exists?'':' hidden';
   var html=`<div class="exercise warmCard" draggable="true" ondragstart="dragModuleStart(event)" ondragover="dragModuleOver(event)" ondrop="dropModule(event)" data-warm-card="${ei}">
     <div class="row between moduleHead">
-      <div class="row"><span class="pill">热身/退阶</span><input class="warmName" data-field="warmName" oninput="renderModuleMap()" value="${escapeHtml(ex.name)}" placeholder="名称"></div>
-      <div class="moduleTools"><button onclick="moveModule(this,-1)">上移</button><button onclick="moveModule(this,1)">下移</button><button class="blue" onclick="openWarmupActionTemplateSwitcher(this)">切换热身</button><button class="blue" onclick="saveWarmupCardAsActionTemplate(this)">保存此动作</button><span class="pill">${escapeHtml(ex.line||'手动项目')}</span></div>
+      <div class="row"><span class="pill">热身/退阶</span><input class="warmName" data-field="warmName" oninput="renderModuleMap();refreshWarmupCardTemplateStatus(this.closest('.warmCard'))" value="${escapeHtml(ex.name)}" placeholder="名称"></div>
+      <div class="moduleTools"><button onclick="moveModule(this,-1)">上移</button><button onclick="moveModule(this,1)">下移</button><button class="blue" onclick="openWarmupActionTemplateSwitcher(this)">切换热身</button><button class="blue${saveCls}" data-template-save-warmup="1" onclick="saveWarmupCardAsActionTemplate(this)">保存此动作</button><span class="pill${statusCls}" data-template-status-warmup="1">已在热身库</span><span class="pill">${escapeHtml(ex.line||'手动项目')}</span></div>
     </div>
     ${lastReferenceHTML(ex.name)}
     <div class="moduleBody"><div class="warmSets">`;
@@ -643,12 +685,15 @@ function mainCardHTML(ex,ei,w,custom){
   var repTxt=String(ex.reps||'');
   var rirTxt=String(ex.rir||'');
   var originalName=ex.originalName||ex.name||'自定义训练模块';
-  var nameInput = `<div class="nameEditBox"><input class="editableTitle" data-field="mainName" data-original-name="${escapeHtml(originalName)}" value="${escapeHtml(ex.name||originalName)}" placeholder="训练名称" oninput="updateOriginalNameHint(this);renderModuleMap()"><div class="originalNameHint">原计划：${escapeHtml(originalName)}</div></div>`;
+  var exists=!!findExerciseTemplateByName(ex.trackName||ex.name||originalName);
+  var saveCls=exists?' hidden':'';
+  var statusCls=exists?'':' hidden';
+  var nameInput = `<div class="nameEditBox"><input class="editableTitle" data-field="mainName" data-original-name="${escapeHtml(originalName)}" value="${escapeHtml(ex.name||originalName)}" placeholder="训练名称" oninput="updateOriginalNameHint(this);renderModuleMap();refreshMainCardTemplateStatus(this.closest('.mainCard'))"><div class="originalNameHint">原计划：${escapeHtml(originalName)}</div></div>`;
   var planSummary=`<div class="planSummary">计划：<b>${setCount}</b> 组 × <b>${escapeHtml(repTxt||'-')}</b> 次${rirTxt?'｜余力 <b>'+escapeHtml(rirTxt)+'</b>':''}</div>`;
-  var html=`<div class="exercise mainCard" data-plan-sets="${setCount}" data-plan-reps="${escapeHtml(repTxt)}" data-plan-rir="${escapeHtml(rirTxt)}" data-original-name="${escapeHtml(originalName)}" draggable="true" ondragstart="dragModuleStart(event)" ondragover="dragModuleOver(event)" ondrop="dropModule(event)" ${custom?'data-custom-main="1"':''}>
+  var html=`<div class="exercise mainCard" data-plan-sets="${setCount}" data-plan-reps="${escapeHtml(repTxt)}" data-plan-rir="${escapeHtml(rirTxt)}" data-original-name="${escapeHtml(originalName)}" data-track-name="${escapeHtml(ex.trackName||ex.name||originalName)}" draggable="true" ondragstart="dragModuleStart(event)" ondragover="dragModuleOver(event)" ondrop="dropModule(event)" ${custom?'data-custom-main="1"':''}>
     <div class="row between moduleHead">
       <div class="row">${nameInput}</div>
-      <div class="moduleTools"><button onclick="moveModule(this,-1)">上移</button><button onclick="moveModule(this,1)">下移</button><button class="blue" onclick="openExerciseTemplateSwitcher(this)">切换动作</button><button class="blue" onclick="saveMainCardAsTemplate(this)">保存此动作</button>${custom?'<button class="bad" onclick="removeMainProject(this)">删除</button>':''}<span class="pill">${escapeHtml(ex.line||'手动项目')}</span></div>
+      <div class="moduleTools"><button onclick="moveModule(this,-1)">上移</button><button onclick="moveModule(this,1)">下移</button><button class="blue" onclick="openExerciseTemplateSwitcher(this)">切换动作</button><button class="blue${saveCls}" data-template-save-main="1" onclick="saveMainCardAsTemplate(this)">保存此动作</button><span class="pill${statusCls}" data-template-status-main="1">已在动作库</span>${custom?'<button class="bad" onclick="removeMainProject(this)">删除</button>':''}<span class="pill">${escapeHtml(ex.line||'手动项目')}</span></div>
     </div>${planSummary}${lastReferenceHTML(ex.trackName||ex.name||originalName)}`;
   if(suggested) html+=`<div class="small">参考：按历史最高 e1RM 换算，本次目标 ${escapeHtml(ex.reps)} 次约 ${suggested}kg。上次记录见右侧。</div>`;
   html+='<div class="moduleBody"><div class="mainSets">';
@@ -689,6 +734,18 @@ function ensureExerciseTemplates(){
   state.exerciseTemplates = state.exerciseTemplates || [];
   return state.exerciseTemplates;
 }
+function updateExerciseTemplateFromCard(tpl,card,name){
+  var fresh=makeExerciseTemplateFromCard(card,name||tpl.name);
+  tpl.name=tpl.name||fresh.name;
+  tpl.trackName=tpl.trackName||fresh.trackName||fresh.name;
+  tpl.originalName=tpl.originalName||fresh.originalName;
+  tpl.sets=fresh.sets;
+  tpl.planReps=fresh.planReps;
+  tpl.planRir=fresh.planRir;
+  tpl.category=tpl.category||fresh.category;
+  tpl.updatedAt=new Date().toISOString();
+  return tpl;
+}
 function getMainSetsFromCard(card){
   return Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow')).map(function(row){
     var get=function(sel){var x=row.querySelector(sel);return x?x.value:'';};
@@ -727,14 +784,37 @@ function saveMainCardAsTemplate(btn){
   var card=btn.closest('.mainCard'); if(!card) return;
   var inp=card.querySelector('[data-field="mainName"]');
   var current=(inp&&inp.value?inp.value:'未命名训练动作').trim();
+  var existing=findExerciseTemplateByName(current);
+  if(existing){
+    updateExerciseTemplateFromCard(existing,card,current);
+    dedupeTemplateLibraries();
+    saveState();
+    refreshMainCardTemplateStatus(card);
+    renderExerciseTemplateList();
+    alert('动作已在动作库，已更新该模板结构，未重复新增。');
+    return;
+  }
   var name=prompt('保存为训练动作模板。模板名称，也是以后追踪上次重量的动作名：', current);
   if(name===null) return;
   name=(name||current||'未命名训练动作').trim();
+  existing=findExerciseTemplateByName(name);
+  if(existing){
+    updateExerciseTemplateFromCard(existing,card,name);
+    dedupeTemplateLibraries();
+    saveState();
+    refreshMainCardTemplateStatus(card);
+    renderExerciseTemplateList();
+    alert('动作已在动作库，已更新该模板结构，未重复新增。');
+    return;
+  }
   var tpl=makeExerciseTemplateFromCard(card,name);
   var cat=prompt('选择部位分类：胸 / 肩 / 背 / 腿 / 臀腿 / 后链/硬拉 / 核心 / 手臂 / 通用', tpl.category||inferExerciseCategory(name));
   if(cat!==null && cat.trim()) tpl.category=cat.trim();
   ensureExerciseTemplates().push(tpl);
+  dedupeTemplateLibraries();
   saveState();
+  refreshMainCardTemplateStatus(card);
+  renderExerciseTemplateList();
   alert('已保存训练动作模板：'+name+'。以后可在“调用训练动作模板”里选择。');
 }
 function saveAllMainCardsAsTemplates(){
@@ -744,9 +824,13 @@ function saveAllMainCardsAsTemplates(){
   cards.forEach(function(card){
     var inp=card.querySelector('[data-field="mainName"]');
     var name=(inp&&inp.value?inp.value:'未命名训练动作').trim();
-    ensureExerciseTemplates().push(makeExerciseTemplateFromCard(card,name));
+    var existing=findExerciseTemplateByName(name);
+    if(existing) updateExerciseTemplateFromCard(existing,card,name);
+    else ensureExerciseTemplates().push(makeExerciseTemplateFromCard(card,name));
   });
+  dedupeTemplateLibraries();
   saveState();
+  refreshAllTemplateStatuses();
   alert('已保存 '+cards.length+' 个训练动作模板。');
 }
 
@@ -797,11 +881,14 @@ function openExerciseTemplatePicker(){
 }
 function renderExerciseTemplateList(){
   var list=document.getElementById('exerciseTemplateList'); if(!list) return;
+  dedupeTemplateLibraries();
   var q=(document.getElementById('exerciseTemplateSearch')&&document.getElementById('exerciseTemplateSearch').value||'').trim().toLowerCase();
   var cat=(document.getElementById('exerciseTemplateCategory')&&document.getElementById('exerciseTemplateCategory').value)||'全部';
-  var arr=ensureExerciseTemplates().slice().reverse().map(function(t){ if(!t.category) t.category=inferExerciseCategory(t.name||t.trackName); return t; }).filter(function(t){
+  var qKey=normalizeTemplateKey(q);
+  var arr=dedupeTemplateArray(ensureExerciseTemplates(),'exercise').slice().sort(function(a,b){return latestTemplateTime(b)-latestTemplateTime(a);}).map(function(t){ if(!t.category) t.category=inferExerciseCategory(t.name||t.trackName); return t; }).filter(function(t){
     var txt=String((t.name||'')+' '+(t.trackName||'')+' '+(t.category||'')).toLowerCase();
-    return (cat==='全部'||t.category===cat) && (!q || txt.indexOf(q)>=0);
+    var key=normalizeTemplateKey(txt);
+    return (cat==='全部'||t.category===cat) && (!q || txt.indexOf(q)>=0 || key.indexOf(qKey)>=0);
   });
   if(!arr.length){list.innerHTML='<pre>暂无匹配动作。已有计划动作会自动沉淀成模板；也可以在动作卡片里点“保存此动作”。</pre>';return;}
   var switchMode=!!(exerciseTemplateSwitchTarget && document.body.contains(exerciseTemplateSwitchTarget));
@@ -835,12 +922,12 @@ function applyExerciseTemplate(id){
 function renameExerciseTemplate(id){
   var tpl=ensureExerciseTemplates().find(function(t){return t.id===id;}); if(!tpl) return;
   var name=prompt('模板名称 / 追踪动作名', tpl.name||''); if(name===null) return;
-  name=(name||tpl.name||'未命名训练动作').trim(); tpl.name=name; tpl.trackName=name; saveState(); renderExerciseTemplateList();
+  name=(name||tpl.name||'未命名训练动作').trim(); tpl.name=name; tpl.trackName=name; tpl.updatedAt=new Date().toISOString(); dedupeTemplateLibraries(); saveState(); renderExerciseTemplateList(); refreshAllTemplateStatuses();
 }
 function editExerciseTemplateCategory(id){
   var tpl=ensureExerciseTemplates().find(function(t){return t.id===id;}); if(!tpl) return;
   var cat=prompt('部位分类：胸 / 肩 / 背 / 腿 / 臀腿 / 后链/硬拉 / 核心 / 手臂 / 通用', tpl.category||inferExerciseCategory(tpl.name));
-  if(cat===null) return; tpl.category=(cat||inferExerciseCategory(tpl.name)).trim(); saveState(); renderExerciseTemplateList();
+  if(cat===null) return; tpl.category=(cat||inferExerciseCategory(tpl.name)).trim(); tpl.updatedAt=new Date().toISOString(); saveState(); renderExerciseTemplateList();
 }
 function deleteExerciseTemplate(id){
   if(!confirm('确认删除这个训练动作模板？')) return;
@@ -851,6 +938,14 @@ function deleteExerciseTemplate(id){
 function ensureWarmupActionTemplates(){
   state.warmupActionTemplates = state.warmupActionTemplates || [];
   return state.warmupActionTemplates;
+}
+function updateWarmupActionTemplateFromCard(tpl,card,name){
+  var fresh=makeWarmupActionTemplateFromCard(card,name||tpl.name);
+  tpl.name=tpl.name||fresh.name;
+  tpl.category=tpl.category||fresh.category;
+  tpl.sets=fresh.sets;
+  tpl.updatedAt=new Date().toISOString();
+  return tpl;
 }
 function getWarmupSetsFromCard(card){
   return Array.prototype.slice.call(card.querySelectorAll('.warmSets .setrow')).map(function(row){
@@ -869,10 +964,30 @@ function saveWarmupCardAsActionTemplate(btn){
   var card=btn.closest('.warmCard'); if(!card) return;
   var inp=card.querySelector('[data-field="warmName"]');
   var current=(inp&&inp.value?inp.value:'未命名热身动作').trim();
+  var existing=findWarmupActionTemplateByName(current);
+  if(existing){
+    updateWarmupActionTemplateFromCard(existing,card,current);
+    dedupeTemplateLibraries();
+    saveState();
+    refreshWarmupCardTemplateStatus(card);
+    renderWarmupActionTemplateList();
+    alert('热身动作已在热身库，已更新该模板结构，未重复新增。');
+    return;
+  }
   var name=prompt('保存为热身动作模板：', current); if(name===null) return;
+  existing=findWarmupActionTemplateByName(name||current);
+  if(existing){
+    updateWarmupActionTemplateFromCard(existing,card,name||current);
+    dedupeTemplateLibraries();
+    saveState();
+    refreshWarmupCardTemplateStatus(card);
+    renderWarmupActionTemplateList();
+    alert('热身动作已在热身库，已更新该模板结构，未重复新增。');
+    return;
+  }
   var tpl=makeWarmupActionTemplateFromCard(card,(name||current));
   var cat=prompt('选择分类：足踝 / 髋 / 胸椎 / 肩胛 / 肩袖 / 核心 / 下肢 / 上肢 / 通用', tpl.category); if(cat!==null&&cat.trim()) tpl.category=cat.trim();
-  ensureWarmupActionTemplates().push(tpl); saveState(); alert('已保存热身动作模板：'+tpl.name);
+  ensureWarmupActionTemplates().push(tpl); dedupeTemplateLibraries(); saveState(); refreshWarmupCardTemplateStatus(card); renderWarmupActionTemplateList(); alert('已保存热身动作模板：'+tpl.name);
 }
 var warmupActionTemplateSwitchTarget=null;
 function openWarmupActionTemplateSwitcher(btn){ warmupActionTemplateSwitchTarget=btn&&btn.closest?btn.closest('.warmCard'):null; renderWarmupActionTemplateList(); var m=document.getElementById('warmupActionTemplateModal'); if(m)m.classList.add('show'); }
@@ -880,10 +995,13 @@ function openWarmupActionTemplatePicker(){ warmupActionTemplateSwitchTarget=null
 function closeWarmupActionTemplateModal(){ var m=document.getElementById('warmupActionTemplateModal'); if(m)m.classList.remove('show'); warmupActionTemplateSwitchTarget=null; }
 function renderWarmupActionTemplateList(){
   var list=document.getElementById('warmupActionTemplateList'); if(!list) return;
+  dedupeTemplateLibraries();
   var q=(document.getElementById('warmupActionTemplateSearch')&&document.getElementById('warmupActionTemplateSearch').value||'').trim().toLowerCase();
   var cat=(document.getElementById('warmupActionTemplateCategory')&&document.getElementById('warmupActionTemplateCategory').value)||'全部';
-  var arr=ensureWarmupActionTemplates().slice().reverse().map(function(t){if(!t.category)t.category=inferWarmupCategory(t.name); return t;}).filter(function(t){
-    var txt=String((t.name||'')+' '+(t.category||'')).toLowerCase(); return (cat==='全部'||t.category===cat) && (!q||txt.indexOf(q)>=0);
+  var qKey=normalizeTemplateKey(q);
+  var arr=dedupeTemplateArray(ensureWarmupActionTemplates(),'warmup').slice().sort(function(a,b){return latestTemplateTime(b)-latestTemplateTime(a);}).map(function(t){if(!t.category)t.category=inferWarmupCategory(t.name); return t;}).filter(function(t){
+    var txt=String((t.name||'')+' '+(t.category||'')).toLowerCase();
+    return (cat==='全部'||t.category===cat) && (!q||txt.indexOf(q)>=0||normalizeTemplateKey(txt).indexOf(qKey)>=0);
   });
   if(!arr.length){list.innerHTML='<pre>暂无匹配热身动作。当前计划里的热身动作会自动沉淀；也可以在热身卡片点“保存此动作”。</pre>';return;}
   var switchMode=!!(warmupActionTemplateSwitchTarget && document.body.contains(warmupActionTemplateSwitchTarget));
@@ -903,8 +1021,8 @@ function applyWarmupActionTemplate(id){
 function switchWarmupActionTemplate(id){
   var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var card=warmupActionTemplateSwitchTarget; if(!card||!document.body.contains(card)){applyWarmupActionTemplate(id);return;} var idx=Array.prototype.slice.call(document.querySelectorAll('#warmupExercises .warmCard')).indexOf(card); var tmp=document.createElement('div'); tmp.innerHTML=warmupTemplateToCardHTML(tpl,idx); var newCard=tmp.firstElementChild; card.parentNode.replaceChild(newCard,card); fillWarmupCardFromTemplate(newCard,tpl); closeWarmupActionTemplateModal(); renderModuleMap(); updateKpis();
 }
-function editWarmupActionTemplateCategory(id){var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var cat=prompt('分类：足踝 / 髋 / 胸椎 / 肩胛 / 肩袖 / 核心 / 下肢 / 上肢 / 通用',tpl.category||inferWarmupCategory(tpl.name)); if(cat===null)return; tpl.category=(cat||inferWarmupCategory(tpl.name)).trim(); saveState(); renderWarmupActionTemplateList();}
-function renameWarmupActionTemplate(id){var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var name=prompt('热身动作名称',tpl.name||''); if(name===null)return; tpl.name=(name||tpl.name).trim(); if(!tpl.category)tpl.category=inferWarmupCategory(tpl.name); saveState(); renderWarmupActionTemplateList();}
+function editWarmupActionTemplateCategory(id){var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var cat=prompt('分类：足踝 / 髋 / 胸椎 / 肩胛 / 肩袖 / 核心 / 下肢 / 上肢 / 通用',tpl.category||inferWarmupCategory(tpl.name)); if(cat===null)return; tpl.category=(cat||inferWarmupCategory(tpl.name)).trim(); tpl.updatedAt=new Date().toISOString(); saveState(); renderWarmupActionTemplateList();}
+function renameWarmupActionTemplate(id){var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var name=prompt('热身动作名称',tpl.name||''); if(name===null)return; tpl.name=(name||tpl.name).trim(); if(!tpl.category)tpl.category=inferWarmupCategory(tpl.name); tpl.updatedAt=new Date().toISOString(); dedupeTemplateLibraries(); saveState(); renderWarmupActionTemplateList(); refreshAllTemplateStatuses();}
 function deleteWarmupActionTemplate(id){if(!confirm('确认删除这个热身动作模板？'))return; state.warmupActionTemplates=ensureWarmupActionTemplates().filter(function(t){return t.id!==id;}); saveState(); renderWarmupActionTemplateList();}
 
 function autoSeedTemplatesFromPlan(){
@@ -914,7 +1032,7 @@ function autoSeedTemplatesFromPlan(){
     try{ (parseExercises(w['训练内容（组×次数/余力）']||'')||[]).forEach(function(ex){var name=normalizeTplName(ex.name); if(!name||/休息|散步|轻拉伸/.test(name)||exerciseTemplateExists(name))return; var restInfo=ex.rest||restToSeconds(ex.line)||{def:120}; var cls=(typeof classifyExerciseTemplate==='function')?classifyExerciseTemplate(ex):null; state.exerciseTemplates.push({id:'autoEx_'+wi+'_'+name+'_'+Math.floor(Math.random()*9999),name:name,trackName:name,originalName:name,sets:Array.from({length:ex.sets||1},function(){return {weight:'',unit:'kg',reps:ex.reps||'',rir:ex.rir||'',duration:ex.duration||'',rest:(restInfo.def||120)}}),planReps:ex.reps||'',planRir:ex.rir||'',category:(cls&&cls.category)||inferExerciseCategory(name),createdAt:new Date().toISOString(),sourceIndex:wi,autoSeed:true}); added++;}); }catch(e){}
     try{ (parseWarmupItems(defaultWarmupText(w)||'')||[]).forEach(function(ex){var name=normalizeTplName(ex.name); if(!name||warmupActionTemplateExists(name))return; state.warmupActionTemplates.push({id:'autoWarm_'+wi+'_'+name+'_'+Math.floor(Math.random()*9999),name:name,category:inferWarmupCategory(name),sets:Array.from({length:ex.sets||1},function(){return {weight:'',unit:'kg',reps:ex.reps||'',rir:'',duration:ex.duration||'',rest:ex.rest||30};}),createdAt:new Date().toISOString(),sourceIndex:wi,autoSeed:true}); added++;}); }catch(e){}
   });
-  if(added) saveState();
+  if(added){ dedupeTemplateLibraries(); saveState(); }
 }
 
 function logForExercise(name){let logs=[]; var n=String(name||'').trim(); state.logs.forEach(function(s){(s.entries||[]).forEach(function(e){if(String(e.name||'').trim()===n || String(e.originalName||'').trim()===n || String(e.trackName||'').trim()===n) logs.push(Object.assign({},e,{date:s.date,title:s.title}));});}); return logs.slice(-5).reverse();}
@@ -1345,6 +1463,36 @@ function updateOriginalNameHint(inp){
     hint.textContent='原计划：'+original;
     hint.classList.remove('changed');
   }
+}
+function currentMainCardTemplateName(card){
+  if(!card) return '';
+  var inp=card.querySelector('[data-field="mainName"]');
+  return (inp&&inp.value) || card.getAttribute('data-track-name') || card.getAttribute('data-original-name') || '';
+}
+function currentWarmupCardTemplateName(card){
+  if(!card) return '';
+  var inp=card.querySelector('[data-field="warmName"]');
+  return (inp&&inp.value) || '';
+}
+function refreshMainCardTemplateStatus(card){
+  if(!card) return;
+  var exists=!!findExerciseTemplateByName(currentMainCardTemplateName(card));
+  var save=card.querySelector('[data-template-save-main]');
+  var status=card.querySelector('[data-template-status-main]');
+  if(save) save.classList.toggle('hidden', exists);
+  if(status) status.classList.toggle('hidden', !exists);
+}
+function refreshWarmupCardTemplateStatus(card){
+  if(!card) return;
+  var exists=!!findWarmupActionTemplateByName(currentWarmupCardTemplateName(card));
+  var save=card.querySelector('[data-template-save-warmup]');
+  var status=card.querySelector('[data-template-status-warmup]');
+  if(save) save.classList.toggle('hidden', exists);
+  if(status) status.classList.toggle('hidden', !exists);
+}
+function refreshAllTemplateStatuses(){
+  document.querySelectorAll('#exercises .mainCard').forEach(refreshMainCardTemplateStatus);
+  document.querySelectorAll('#warmupExercises .warmCard').forEach(refreshWarmupCardTemplateStatus);
 }
 
 function setCollapseButton(card){
