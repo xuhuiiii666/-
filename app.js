@@ -58,6 +58,12 @@ function normalizeTemplateKey(x){
     .toLowerCase()
     .replace(/[（）]/g,function(ch){return ch==='（'?'(':')';})
     .replace(/\([^)]*\)/g,'')
+    .replace(/[｜|].*$/,'')
+    .replace(/(?:余力|rir|建议重量|建议|休息|休)\s*[:：]?\s*[\d.\-至~～]*\s*(?:kg|公斤|lb|秒|s|分钟|min)?/gi,'')
+    .replace(/\d{1,2}\s*(?:组\s*)?[x×＊*]\s*[\d.\-至~～]+(?:\s*(?:次|秒|s|分钟|min|呼吸))?(?:\/侧)?/gi,'')
+    .replace(/\d{1,2}\s*组/gi,'')
+    .replace(/\d{1,3}\s*(?:秒|s)(?:\/侧)?(?:\s*[x×＊*]\s*\d{1,2})?/gi,'')
+    .replace(/\d+(?:\.\d+)?\s*(?:kg|公斤|lb)/gi,'')
     .replace(/\s+/g,'')
     .replace(/[　]/g,'')
     .trim();
