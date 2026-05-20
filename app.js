@@ -22,6 +22,7 @@ try{
   if(Array.isArray(importedWarmups) && importedWarmups.length){ WARMUPS = importedWarmups; }
 }catch(e){}
 try{ if(ensureDateMigration()) saveState(); }catch(e){}
+try{ state.logs=getBackupLogsFromState(state); state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs); }catch(e){}
 try{ if(dedupeTemplateLibraries()) saveState(); }catch(e){}
 let activeSet = null, timerLeft=180, timerBase=180, timerId=null;
 let rowTimers = {}; // 每一组都能独立显示自己的倒计时；实际同时只跑一个，避免训练时多个铃同时响。
@@ -238,6 +239,112 @@ function ensureDateMigration(){
     }
   }
   return changed;
+}
+function normalizeExerciseName(name){
+  return normalizeTemplateKey(name);
+}
+function getBackupLogsFromState(src){
+  src=src||{};
+  var logs=src.logs||src.workoutLogs||src.trainingLogs||src.history||src.completedWorkouts||[];
+  return Array.isArray(logs)?logs:[];
+}
+function getExerciseItemsFromLog(log){
+  log=log||{};
+  var arr=log.entries||log.exercises||log.training||log.items||[];
+  return Array.isArray(arr)?arr:[];
+}
+function getLogDate(log){
+  return (log&&(log.actualDate||log.date||log.performedDate||log.completedAt||log.createdAt))||'';
+}
+function getLogIndex(log){
+  if(!log) return undefined;
+  if(typeof log.planIndex==='number') return log.planIndex;
+  if(typeof log.index==='number') return log.index;
+  if(typeof log.workoutIndex==='number') return log.workoutIndex;
+  return undefined;
+}
+function hasMeaningfulSet(set){
+  return !!(set&&(set.weight||set.reps||set.rir||set.duration||set.note));
+}
+function buildExerciseHistoryFromLogs(workoutLogs){
+  var history={};
+  (workoutLogs||[]).forEach(function(log,li){
+    var date=getLogDate(log);
+    var title=(log&&((log.title||log.workoutTitle||log['训练主题'])))||'';
+    var workoutIndex=getLogIndex(log);
+    var grouped={};
+    getExerciseItemsFromLog(log).forEach(function(item){
+      var rawName=item.trackingName||item.trackName||item.name||item.originalName;
+      var key=normalizeExerciseName(rawName);
+      if(!key) return;
+      if(!grouped[key]){
+        grouped[key]={date:date,workoutTitle:title,workoutIndex:workoutIndex,sourceLogIndex:li,name:rawName,originalName:item.originalName||rawName,trackName:item.trackName||item.trackingName||rawName,sets:[],note:item.note||''};
+      }
+      var itemSets=Array.isArray(item.sets)?item.sets:[item];
+      itemSets.forEach(function(st,si){
+        st=st||{};
+        var setObj={set:st.set||st.index||st.setIndex||si+1,weight:st.weight||'',unit:st.unit||'kg',weightKg:st.weightKg||weightToKg(st.weight,st.unit||'kg'),reps:st.reps||'',rir:st.rir||st.RIR||'',duration:st.duration||'',rest:st.rest||'',note:st.note||item.note||'',e1rm:st.e1rm||Math.round(e1rm(st.weightKg||weightToKg(st.weight,st.unit||'kg'),st.reps)*10)/10};
+        if(hasMeaningfulSet(setObj)) grouped[key].sets.push(setObj);
+      });
+    });
+    Object.keys(grouped).forEach(function(key){
+      if(!grouped[key].sets.length) return;
+      history[key]=history[key]||[];
+      history[key].push(grouped[key]);
+    });
+  });
+  Object.keys(history).forEach(function(key){
+    history[key].sort(function(a,b){
+      var da=String(a.date||''), db=String(b.date||'');
+      if(da===db) return (a.sourceLogIndex||0)-(b.sourceLogIndex||0);
+      return da.localeCompare(db);
+    });
+  });
+  return history;
+}
+function ensureExerciseHistory(){
+  state.logs=getBackupLogsFromState(state);
+  if(!state.exerciseHistory || !Object.keys(state.exerciseHistory||{}).length){
+    state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs);
+  }
+  return state.exerciseHistory||{};
+}
+function getLastExercisePerformance(exerciseName){
+  var key=normalizeExerciseName(exerciseName);
+  if(!key) return null;
+  var history=ensureExerciseHistory();
+  var records=history[key]||[];
+  if(!records.length){
+    state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs||[]);
+    records=state.exerciseHistory[key]||[];
+  }
+  var valid=records.filter(function(r){return r&&r.sets&&r.sets.some(hasMeaningfulSet);}).sort(function(a,b){
+    var da=String(a.date||''), db=String(b.date||'');
+    if(da===db) return (b.sourceLogIndex||0)-(a.sourceLogIndex||0);
+    return db.localeCompare(da);
+  });
+  return valid[0]||null;
+}
+function mergeBackupIntoState(backupState){
+  backupState=backupState||{};
+  var next=Object.assign({},state,backupState);
+  var logs=getBackupLogsFromState(backupState);
+  next.logs=logs;
+  next.workoutLogs=logs;
+  next.exerciseTemplates=backupState.exerciseTemplates||next.exerciseTemplates||[];
+  next.warmupTemplates=backupState.warmupTemplates||next.warmupTemplates||[];
+  next.warmupActionTemplates=backupState.warmupActionTemplates||next.warmupActionTemplates||[];
+  next.settings=backupState.settings||next.settings||{mainRest:180,assistRest:90};
+  next.dateAnchors=backupState.dateAnchors||next.dateAnchors||{};
+  next.actualDates=backupState.actualDates||next.actualDates||{};
+  next.currentIndex=Number(backupState.currentIndex!==undefined?backupState.currentIndex:next.currentIndex)||0;
+  next.selectedCalendarIndex=Number(backupState.selectedCalendarIndex!==undefined?backupState.selectedCalendarIndex:(backupState.selectedIndex!==undefined?backupState.selectedIndex:next.selectedCalendarIndex))||next.currentIndex||0;
+  next.currentSessionNote=backupState.currentSessionNote!==undefined?backupState.currentSessionNote:(backupState.draftNote||backupState.quickNote||'');
+  next.draftNote=next.currentSessionNote||'';
+  next.quickNote=next.currentSessionNote||'';
+  next.rmRecords=backupState.rmRecords||next.rmRecords||[];
+  next.exerciseHistory=logs.length?buildExerciseHistoryFromLogs(logs):(backupState.exerciseHistory||{});
+  return next;
 }
 function actualDateFor(index){
   state.actualDates=state.actualDates||{};
@@ -667,18 +774,19 @@ function renderModuleMap(){
   box.innerHTML='<div class="moduleMapHead"><div class="moduleMapTitle">训练模块简图</div><div class="moduleMapHint">点卡片跳转，拖动或用 ← → 调顺序</div></div>'+list('warm')+list('main');
 }
 function lastReferenceHTML(name){
-  var n=String(name||'').trim(); if(!n) return '<div class="lastRef">上次：暂无同名记录</div>';
-  for(var i=(state.logs||[]).length-1;i>=0;i--){
-    var sess=state.logs[i]||{}; var entries=(sess.entries||[]).filter(function(e){return e.name===n || e.originalName===n;});
-    if(entries.length){
-      var parts=entries.slice(0,5).map(function(e){
-        var w=e.weight?displayWeight(e.weight,e.unit||'kg'):''; var reps=e.reps?('×'+e.reps):''; var rir=e.rir?(' RIR '+e.rir):''; var dur=e.duration?(' '+e.duration+'s'):'';
-        return (e.set?('第'+e.set+'组 '):'')+(w||dur||'-')+reps+rir;
-      });
-      var best=Math.max.apply(null, entries.map(function(e){return e1rm(e.weight,e.reps)||0;}));
-      var e1=best?('｜最高e1RM '+(Math.round(best*10)/10)) : '';
-      return '<div class="lastRef"><b>上次同名：</b>'+escapeHtml(sess.date||'')+'｜'+escapeHtml(parts.join('；'))+escapeHtml(e1)+'</div>';
-    }
+  var rec=getLastExercisePerformance(name);
+  if(rec){
+    var entries=(rec.sets||[]).slice(0,5);
+    var parts=entries.map(function(e){
+      var w=e.weight?displayWeight(e.weight,e.unit||'kg'):'';
+      var reps=e.reps?('×'+e.reps):'';
+      var rir=e.rir?(' RIR '+e.rir):'';
+      var dur=e.duration?(' '+e.duration+'s'):'';
+      return (e.set?('第'+e.set+'组 '):'')+(w||dur||'-')+reps+rir;
+    });
+    var best=Math.max.apply(null, entries.map(function(e){return e.e1rm||e1rm(e.weightKg||weightToKg(e.weight,e.unit||'kg'),e.reps)||0;}));
+    var e1=best&&isFinite(best)?('｜最高e1RM '+(Math.round(best*10)/10)) : '';
+    return '<div class="lastRef"><b>上次同名：</b>'+escapeHtml(rec.date||'')+'｜'+escapeHtml(parts.join('；'))+escapeHtml(e1)+'</div>';
   }
   return '<div class="lastRef"><b>上次同名：</b>暂无记录</div>';
 }
@@ -1072,7 +1180,23 @@ function autoSeedTemplatesFromPlan(){
   if(added){ dedupeTemplateLibraries(); saveState(); }
 }
 
-function logForExercise(name){let logs=[]; var n=String(name||'').trim(); state.logs.forEach(function(s){(s.entries||[]).forEach(function(e){if(String(e.name||'').trim()===n || String(e.originalName||'').trim()===n || String(e.trackName||'').trim()===n) logs.push(Object.assign({},e,{date:s.date,title:s.title}));});}); return logs.slice(-5).reverse();}
+function logForExercise(name){
+  var key=normalizeExerciseName(name);
+  if(!key) return [];
+  var history=ensureExerciseHistory();
+  var records=history[key]||[];
+  if(!records.length){
+    state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs||[]);
+    records=state.exerciseHistory[key]||[];
+  }
+  var flat=[];
+  records.forEach(function(r){
+    (r.sets||[]).forEach(function(st){
+      flat.push(Object.assign({},st,{date:r.date,title:r.workoutTitle,workoutIndex:r.workoutIndex,name:r.name,originalName:r.originalName,trackName:r.trackName}));
+    });
+  });
+  return flat.filter(hasMeaningfulSet).slice(-5).reverse();
+}
 function e1rm(w,r){w=parseFloat(w);r=parseFloat(r); if(!w||!r)return 0; return w*(1+r/30);}
 function suggestWeight(exName,targetReps){
   let logs=logForExercise(exName); if(!logs.length)return '';
@@ -1371,6 +1495,8 @@ function finishWorkout(){
   var note=syncFloatingNote();
   var logObj={date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:'已完成', note:note, entries};
   state.logs.push(logObj); archiveSessionNote(logObj);
+  state.workoutLogs=state.logs;
+  state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs);
   state.completed = state.completed||{}; state.completed[state.currentIndex]=true;
   state.currentIndex=Math.min(state.currentIndex+1,PLAN.length-1);
   if(!state.keepNoteForNext) setCurrentSessionNote('',{noSave:true});
@@ -1763,7 +1889,7 @@ function renderCalendar(){
 }
 function renderHistory(){
   if(!state.logs.length){document.getElementById('historyTable').innerHTML='<p class="small">暂无训练记录。</p>';return}
-  let rows=[]; state.logs.slice().sort(function(a,b){return String(b.actualDate||b.date||'').localeCompare(String(a.actualDate||a.date||''));}).forEach(l=>{var d=l.actualDate||l.date||'';rows.push(`<tr><td>${displayDateLabel(d)}</td><td>#${(l.planIndex??0)+1}</td><td>${escapeHtml(l.title||'')}</td><td>${escapeHtml(l.status||'已完成')}</td><td>${l.entries.length}</td><td>${Math.round(l.entries.reduce((a,e)=>a+(parseFloat(e.weight)||0)*(parseFloat(e.reps)||0),0))}</td><td>${escapeHtml(l.note||'')}</td></tr>`)});
+  let rows=[]; state.logs.slice().sort(function(a,b){return String(getLogDate(b)).localeCompare(String(getLogDate(a)));}).forEach(l=>{var d=getLogDate(l);var entries=getExerciseItemsFromLog(l);rows.push(`<tr><td>${displayDateLabel(d)}</td><td>#${(getLogIndex(l)??0)+1}</td><td>${escapeHtml(l.title||l.workoutTitle||'')}</td><td>${escapeHtml(l.status||'已完成')}</td><td>${entries.length}</td><td>${Math.round(entries.reduce((a,e)=>a+(parseFloat(e.weight)||0)*(parseFloat(e.reps)||0),0))}</td><td>${escapeHtml(l.note||'')}</td></tr>`)});
   document.getElementById('historyTable').innerHTML=`<table><thead><tr><th>实际日期</th><th>训练序号</th><th>训练标题</th><th>完成状态</th><th>记录组数</th><th>总量</th><th>备注</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
 }
 function renderSettings(){document.getElementById('startDate').value=state.startDate;document.getElementById('currentIndex').value=state.currentIndex;document.getElementById('mainRest').value=state.settings.mainRest;document.getElementById('assistRest').value=state.settings.assistRest;}
@@ -1982,6 +2108,8 @@ function finishWorkoutCompleteBackup(){
     brief=buildBriefText(log);
     state.logs.push(log);
     archiveSessionNote(log);
+    state.workoutLogs=state.logs;
+    state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs);
     console.log('[complete] mark completed');
     state.completed = state.completed||{};
     state.completed[state.currentIndex]=true;
@@ -2019,7 +2147,21 @@ function buildCycleBackupObject(){
   var importedPlan=null, importedWarmups=null;
   try{importedPlan=JSON.parse(localStorage.getItem(KEY+'_importedPlan')||'null');}catch(e){}
   try{importedWarmups=JSON.parse(localStorage.getItem(KEY+'_importedWarmups')||'null');}catch(e){}
-  return {version:3, exportedAt:new Date().toISOString(), app:'training-tracker', dateMode:'actualDate-first', state:state, importedPlan:importedPlan, importedWarmups:importedWarmups};
+  state.logs=getBackupLogsFromState(state);
+  state.workoutLogs=state.logs;
+  state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs);
+  var backupState=Object.assign({},state,{
+    plan:PLAN,
+    workoutLogs:state.logs,
+    exerciseHistory:state.exerciseHistory,
+    exerciseTemplates:state.exerciseTemplates||[],
+    warmupTemplates:state.warmupTemplates||[],
+    warmupActionTemplates:state.warmupActionTemplates||[],
+    settings:state.settings||{},
+    currentSessionNote:getCurrentSessionNote(),
+    rmRecords:state.rmRecords||[]
+  });
+  return {version:4, exportedAt:new Date().toISOString(), app:'training-tracker', dateMode:'actualDate-first', state:backupState, importedPlan:importedPlan||PLAN, importedWarmups:importedWarmups||WARMUPS};
 }
 function exportCycleBackup(){
   autoSaveWarmupDraft();
@@ -2038,8 +2180,9 @@ function importCycleBackupFile(ev){
       var newState=obj.state||obj;
       if(!newState || typeof newState!=='object') throw new Error('invalid');
       if(!confirm('确认导入周期备份？当前浏览器里的训练记录会被备份内容覆盖。')) return;
-      state=newState;
+      state=mergeBackupIntoState(newState);
       if(!state.logs) state.logs=[];
+      state.workoutLogs=state.logs;
       if(!state.completed) state.completed={};
       if(!state.dateAnchors) state.dateAnchors={};
       if(!state.actualDates) state.actualDates={};
@@ -2047,13 +2190,28 @@ function importCycleBackupFile(ev){
       if(state.currentSessionNote===undefined) state.currentSessionNote=state.draftNote||state.quickNote||'';
       state.draftNote=state.currentSessionNote||'';
       state.quickNote=state.currentSessionNote||'';
+      state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs);
       ensureDateMigration();
+      if(newState.plan && Array.isArray(newState.plan) && newState.plan.length) PLAN=newState.plan;
+      else if(obj.importedPlan && Array.isArray(obj.importedPlan) && obj.importedPlan.length) PLAN=obj.importedPlan;
+      if(obj.importedWarmups && Array.isArray(obj.importedWarmups) && obj.importedWarmups.length) WARMUPS=obj.importedWarmups;
       saveState();
-      if(obj.importedPlan) localStorage.setItem(KEY+'_importedPlan', JSON.stringify(obj.importedPlan));
-      if(obj.importedWarmups) localStorage.setItem(KEY+'_importedWarmups', JSON.stringify(obj.importedWarmups));
-      alert('导入成功，已恢复周期记录。');
-      location.reload();
-    }catch(e){alert('导入失败：不是有效的训练器备份 JSON。');}
+      localStorage.setItem(KEY+'_importedPlan', JSON.stringify(PLAN));
+      if(obj.importedWarmups) localStorage.setItem(KEY+'_importedWarmups', JSON.stringify(WARMUPS));
+      dedupeTemplateLibraries();
+      saveState();
+      rebuild();
+      renderHistory();
+      renderCalendar();
+      renderSettings();
+      var logCount=(state.logs||[]).length;
+      var actionCount=Object.keys(state.exerciseHistory||{}).length;
+      var tplCount=(state.exerciseTemplates||[]).length+(state.warmupTemplates||[]).length+(state.warmupActionTemplates||[]).length;
+      var summary='周期备份已导入\n训练日志：'+logCount+' 条\n动作历史：'+actionCount+' 个动作\n模板：'+tplCount+' 个\n当前训练：#'+((state.currentIndex||0)+1);
+      if(!logCount) summary+='\n\n已导入计划，但没有发现训练日志，所以不会显示上次重量。';
+      showToast('周期备份已导入，训练记录和动作历史已恢复');
+      alert(summary);
+    }catch(e){console.error('导入周期备份失败',e);alert('导入失败：不是有效的训练器备份 JSON。');}
   };
   reader.readAsText(file);
   ev.target.value='';
@@ -2061,7 +2219,7 @@ function importCycleBackupFile(ev){
 
 function goCurrentPending(){ state.selectedCalendarIndex=state.currentIndex; saveState(); renderCalendar(); setTimeout(function(){scrollCalendarToCurrent();},60); }
 function exportData(){let blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});let a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='training-log.json';a.click();}
-function clearLogs(){if(confirm('确认清空所有训练记录？')){state.logs=[];state.completed={};state.currentIndex=0;state.dateAnchors={};state.actualDates={};state.lastActualIndex=null;state.lastActualDate='';saveState();rebuild();renderHistory();}}
+function clearLogs(){if(confirm('确认清空所有训练记录？')){state.logs=[];state.workoutLogs=[];state.exerciseHistory={};state.completed={};state.currentIndex=0;state.dateAnchors={};state.actualDates={};state.lastActualIndex=null;state.lastActualDate='';saveState();rebuild();renderHistory();}}
 
 
 /* ===== 手机导航稳定版 + 训练日顺序移动 ===== */
