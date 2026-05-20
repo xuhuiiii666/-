@@ -9,6 +9,7 @@ if(!state.settings) state.settings={mainRest:180,assistRest:90};
 if(!state.dateAnchors) state.dateAnchors={}; // 训练序号 -> 实际标注日期。后续日期会从最近锚点继续顺延。
 if(!state.actualDates) state.actualDates={}; // 训练序号 -> 实际训练发生日期；一旦写入就优先显示和归档。
 if(!state.customWarmups) state.customWarmups={}; // 按训练目的保存：胸训/腿训/通用
+if(!state.currentWorkoutDrafts) state.currentWorkoutDrafts={}; // 按训练序号保存尚未完成的重量/次数/余力草稿。
 if(state.selectedCalendarIndex===undefined) state.selectedCalendarIndex=state.currentIndex||0;
 if(state.quickNote===undefined) state.quickNote='';
 if(state.currentSessionNote===undefined) state.currentSessionNote=state.draftNote||state.quickNote||'';
@@ -324,6 +325,60 @@ function getLastExercisePerformance(exerciseName){
     return db.localeCompare(da);
   });
   return valid[0]||null;
+}
+function currentDraftKey(){
+  return String(Math.max(0,Math.min(PLAN.length-1,Number(state.currentIndex)||0)));
+}
+function readSetRow(row){
+  row=row||{};
+  var get=function(sel){var x=row.querySelector&&row.querySelector(sel);return x?x.value:'';};
+  var range=row.querySelector&&row.querySelector('input[type=range]');
+  return {weight:get('[data-field="weight"]'),unit:get('[data-field="unit"]')||'kg',reps:get('[data-field="reps"]'),rir:get('[data-field="rir"]'),duration:get('[data-field="duration"]'),rest:range?range.value:''};
+}
+function writeSetRow(row,data){
+  if(!row||!data) return;
+  var set=function(sel,val){var x=row.querySelector(sel); if(x&&val!==undefined){x.value=val==null?'':val; if(x.type==='range') updateRestLabel(x);}};
+  set('[data-field="weight"]',data.weight);
+  set('[data-field="unit"]',data.unit||'kg');
+  set('[data-field="reps"]',data.reps);
+  set('[data-field="rir"]',data.rir);
+  set('[data-field="duration"]',data.duration);
+  set('input[type=range]',data.rest);
+  var dt=row.querySelector('.actionTimer');
+  if(dt) dt.textContent=data.duration?fmt(parseInt(data.duration,10)||0):'--:--';
+}
+function captureCurrentWorkoutDraft(){
+  state.currentWorkoutDrafts=state.currentWorkoutDrafts||{};
+  var draft={updatedAt:new Date().toISOString(),planIndex:state.currentIndex,note:getCurrentSessionNote(),warmupInput:(document.getElementById('warmupInput')&&document.getElementById('warmupInput').value)||'',warmups:[],mains:[]};
+  document.querySelectorAll('#warmupExercises .warmCard').forEach(function(card){
+    draft.warmups.push({name:(card.querySelector('[data-field="warmName"]')&&card.querySelector('[data-field="warmName"]').value)||'',sets:Array.prototype.slice.call(card.querySelectorAll('.warmSets .setrow')).map(readSetRow)});
+  });
+  document.querySelectorAll('#exercises .mainCard').forEach(function(card){
+    draft.mains.push({name:(card.querySelector('[data-field="mainName"]')&&card.querySelector('[data-field="mainName"]').value)||'',originalName:card.getAttribute('data-original-name')||'',trackName:card.getAttribute('data-track-name')||'',custom:card.hasAttribute('data-custom-main'),sets:Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow')).map(readSetRow)});
+  });
+  state.currentWorkoutDrafts[currentDraftKey()]=draft;
+  return draft;
+}
+function restoreCurrentWorkoutDraft(){
+  var draft=state.currentWorkoutDrafts&&state.currentWorkoutDrafts[currentDraftKey()];
+  if(!draft) return;
+  if(draft.note!==undefined) setCurrentSessionNote(draft.note,{noSave:true});
+  (draft.warmups||[]).forEach(function(saved,idx){
+    var card=document.querySelectorAll('#warmupExercises .warmCard')[idx]; if(!card) return;
+    var name=card.querySelector('[data-field="warmName"]'); if(name&&saved.name) name.value=saved.name;
+    var rows=Array.prototype.slice.call(card.querySelectorAll('.warmSets .setrow'));
+    (saved.sets||[]).forEach(function(st,i){ if(rows[i]) writeSetRow(rows[i],st); });
+  });
+  (draft.mains||[]).forEach(function(saved,idx){
+    var card=document.querySelectorAll('#exercises .mainCard')[idx]; if(!card) return;
+    var name=card.querySelector('[data-field="mainName"]'); if(name&&saved.name) name.value=saved.name;
+    var rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow'));
+    (saved.sets||[]).forEach(function(st,i){ if(rows[i]) writeSetRow(rows[i],st); });
+  });
+}
+function clearCurrentWorkoutDraft(index){
+  state.currentWorkoutDrafts=state.currentWorkoutDrafts||{};
+  delete state.currentWorkoutDrafts[String(index===undefined?state.currentIndex:index)];
 }
 function mergeBackupIntoState(backupState){
   backupState=backupState||{};
@@ -1250,6 +1305,11 @@ function updateRestValue(id,val){
   if(rv) rv.textContent=val+'s';
   if(mt && (!rowTimers[id] || !rowTimers[id].running)) mt.textContent=fmt(val);
 }
+function updateRestLabel(input){
+  var cell=input&&input.closest?input.closest('.restCell'):null;
+  if(!cell||!cell.id) return;
+  updateRestValue(cell.id.replace(/^rest_/,''),input.value);
+}
 
 
 function rebuild(){
@@ -1271,6 +1331,7 @@ function rebuild(){
   var html='';
   exs.forEach(function(ex,ei){ html+=mainCardHTML(ex,ei,w,false); });
   document.getElementById('exercises').innerHTML=html || '<pre>休息/轻活动：今天不需要正式训练。</pre>';
+  restoreCurrentWorkoutDraft();
   bindTrainingDataInputs(document);
   renderModuleMap();
   updateKpis(); renderLast(exs); renderTimer();
@@ -1302,6 +1363,7 @@ function isTrainingDataField(el){
 function handleTrainingDataInput(ev){
   if(ev && ev.target && isTrainingDataField(ev.target)){
     markCurrentTrainingToday({noSave:true});
+    captureCurrentWorkoutDraft();
     saveState();
   }
   updateKpis();
@@ -1337,7 +1399,7 @@ function collectEntries(){
       let rir=row.querySelector('[data-field="rir"]')?.value||'';
       let rest=row.querySelector('input[type=range]')?.value||'';
       let duration=row.querySelector('[data-field="duration"]')?.value||'';
-      if(weight||reps||rir||duration||moduleNote) entries.push({type:'热身/退阶',name,set:ri+1,weight,unit,weightKg:Math.round(weightKg*10)/10,reps,duration,rir,rest,note:moduleNote,target:'手动/识别热身',e1rm:Math.round(e1rm(weightKg,reps)*10)/10});
+      if(weight||reps||rir||duration||moduleNote) entries.push({type:'热身/退阶',name,trackingName:name,trackName:name,originalName:name,set:ri+1,weight,unit,weightKg:Math.round(weightKg*10)/10,reps,duration,rir,rest,note:moduleNote,target:'手动/识别热身',e1rm:Math.round(e1rm(weightKg,reps)*10)/10});
     });
   });
   exs.forEach((ex,ei)=>{
@@ -1346,7 +1408,9 @@ function collectEntries(){
     let rows=[...document.querySelectorAll(`[data-ex="${ei}"][data-field="weight"]`)];
     rows.forEach(inp=>{
       let row=getRowFromWeightInput(inp); let unit=row.querySelector('[data-field="unit"]')?.value||'kg'; let weightKg=weightToKg(inp.value,unit); let reps=row.querySelector('[data-field="reps"]').value; let rir=row.querySelector('[data-field="rir"]').value; let duration=row.querySelector('[data-field="duration"]')?.value||'';
-      if(inp.value||reps||duration||moduleNote) entries.push({type:'主训练',name:(card.querySelector('[data-field=\"mainName\"]')?card.querySelector('[data-field=\"mainName\"]').value:ex.name),originalName:(card.getAttribute('data-original-name')||ex.name),trackName:(card.querySelector('[data-field=\"mainName\"]')?card.querySelector('[data-field=\"mainName\"]').value:ex.name),set:inp.dataset.set,weight:inp.value,unit,weightKg:Math.round(weightKg*10)/10,reps,duration,rir,note:moduleNote,target:ex.line,e1rm:Math.round(e1rm(weightKg,reps)*10)/10});
+      var mainName=card&&card.querySelector('[data-field=\"mainName\"]')?card.querySelector('[data-field=\"mainName\"]').value:ex.name;
+      var originalName=card?(card.getAttribute('data-original-name')||ex.name):ex.name;
+      if(inp.value||reps||rir||duration||moduleNote) entries.push({type:'主训练',name:mainName,trackingName:mainName,originalName:originalName,trackName:mainName,set:inp.dataset.set,weight:inp.value,unit,weightKg:Math.round(weightKg*10)/10,reps,duration,rir,note:moduleNote,target:ex.line,e1rm:Math.round(e1rm(weightKg,reps)*10)/10});
     });
   });
   document.querySelectorAll('#exercises .mainCard[data-custom-main]').forEach((card,ci)=>{
@@ -1359,7 +1423,7 @@ function collectEntries(){
       let reps=row.querySelector('[data-field="reps"]')?.value||'';
       let rir=row.querySelector('[data-field="rir"]')?.value||'';
       let duration=row.querySelector('[data-field="duration"]')?.value||'';
-      if(weight||reps||rir||duration||moduleNote) entries.push({type:'自定义主训练',name,originalName:name,trackName:name,set:ri+1,weight,unit,weightKg:Math.round(weightKg*10)/10,reps,duration,rir,note:moduleNote,target:'手动新增训练模块',e1rm:Math.round(e1rm(weightKg,reps)*10)/10});
+      if(weight||reps||rir||duration||moduleNote) entries.push({type:'自定义主训练',name,trackingName:name,originalName:name,trackName:name,set:ri+1,weight,unit,weightKg:Math.round(weightKg*10)/10,reps,duration,rir,note:moduleNote,target:'手动新增训练模块',e1rm:Math.round(e1rm(weightKg,reps)*10)/10});
     });
   });
   return entries;
@@ -1487,9 +1551,19 @@ function initFloatingNoteDrag(){
   window.addEventListener('resize',function(){setTimeout(clampFloatingNote,80);});
 }
 
-function saveProgress(){ markCurrentTrainingToday({noSave:true}); autoSaveWarmupDraft(); syncFloatingNote(); saveState(); alert('已保存当前输入、热身项目和实际训练日期。');}
+function saveProgress(){
+  markCurrentTrainingToday({noSave:true});
+  syncFloatingNote();
+  captureCurrentWorkoutDraft();
+  var w=getWorkout(), key='idx_'+state.currentIndex, input=document.getElementById('warmupInput');
+  if(input) state.customWarmups[key]=input.value;
+  saveState();
+  alert('已保存当前输入、热身项目和实际训练日期。');
+}
 function finishWorkout(){
   markCurrentTrainingToday({noSave:true});
+  captureCurrentWorkoutDraft();
+  var completedIndex=state.currentIndex;
   let w=getWorkout(); let entries=collectEntries();
   let logDate=actualDateFor(state.currentIndex) || localDateString();
   var note=syncFloatingNote();
@@ -1498,6 +1572,7 @@ function finishWorkout(){
   state.workoutLogs=state.logs;
   state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs);
   state.completed = state.completed||{}; state.completed[state.currentIndex]=true;
+  clearCurrentWorkoutDraft(completedIndex);
   state.currentIndex=Math.min(state.currentIndex+1,PLAN.length-1);
   if(!state.keepNoteForNext) setCurrentSessionNote('',{noSave:true});
   state.keepNoteForNext=false; saveState(); rebuild(); alert('已完成，并推进到下一练。');
@@ -1962,8 +2037,13 @@ function initWarmupPanel(){
 
 function buildWorkoutLogFromCurrent(){
   markCurrentTrainingToday({noSave:true});
-  autoSaveWarmupDraft();
+  captureCurrentWorkoutDraft();
   var w=getWorkout();
+  var warmInput=document.getElementById('warmupInput');
+  if(warmInput){
+    state.customWarmups=state.customWarmups||{};
+    state.customWarmups['idx_'+state.currentIndex]=warmInput.value;
+  }
   var entries=collectEntries();
   var note=syncFloatingNote();
   var logDate=actualDateFor(state.currentIndex) || localDateString();
@@ -2104,12 +2184,14 @@ function finishWorkoutCompleteBackup(){
   try{
     console.log('[complete] save log start');
     syncFloatingNote();
+    var completedIndex=state.currentIndex;
     log=buildWorkoutLogFromCurrent();
     brief=buildBriefText(log);
     state.logs.push(log);
     archiveSessionNote(log);
     state.workoutLogs=state.logs;
     state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs);
+    clearCurrentWorkoutDraft(completedIndex);
     console.log('[complete] mark completed');
     state.completed = state.completed||{};
     state.completed[state.currentIndex]=true;
@@ -2164,8 +2246,13 @@ function buildCycleBackupObject(){
   return {version:4, exportedAt:new Date().toISOString(), app:'training-tracker', dateMode:'actualDate-first', state:backupState, importedPlan:importedPlan||PLAN, importedWarmups:importedWarmups||WARMUPS};
 }
 function exportCycleBackup(){
-  autoSaveWarmupDraft();
   syncFloatingNote();
+  captureCurrentWorkoutDraft();
+  var warmInput=document.getElementById('warmupInput');
+  if(warmInput){
+    state.customWarmups=state.customWarmups||{};
+    state.customWarmups['idx_'+state.currentIndex]=warmInput.value;
+  }
   state.lastBackupAt=new Date().toISOString();
   saveState();
   downloadCycleBackupFile(false);
