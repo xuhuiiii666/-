@@ -84,7 +84,7 @@
       <div id="exercises"></div>
       <div class="bottomAdd row"><button class="primary" onclick="addMainProject()">＋在训练底部添加训练模块</button><button class="blue" onclick="openExerciseTemplatePicker()">调用训练动作模板</button><button onclick="saveAllMainCardsAsTemplates()">保存当前全部动作为模板</button></div>
       <label class="small">今日备注 / 体感</label>
-      <textarea id="sessionNote" placeholder="比如：睡眠差、膝盖感觉、肩胛卡顿、今天状态..."></textarea>
+      <textarea id="sessionNote" placeholder="比如：睡眠差、膝盖感觉、肩胛卡顿、今天状态..." oninput="saveSessionNoteFromInput(this)"></textarea>
       <div class="row finishUnified" style="margin-top:10px">
         <button class="ok" onclick="finishWorkoutCompleteBackup()">完成今日训练｜进入下一练｜同步备份</button>
         <button class="blue" onclick="saveProgress()">只保存，不完成</button>
@@ -98,6 +98,7 @@
           <button onclick="exportCycleBackup()">手动导出周期备份</button>
           <button onclick="document.getElementById('backupImportFile').click()">导入周期备份</button>
         </div>
+        <div class="small" id="completeDebugStatus" style="margin-top:8px">最近操作状态：暂无<br>错误信息：无</div>
         <div class="small" style="margin-top:6px">备份内容会不断叠加训练日期与日志；iPhone 浏览器通常不能无提示覆盖同一个本地文件，会生成/保存最新备份。导入最新备份即可恢复整个周期。</div>
         <input id="backupImportFile" type="file" accept="application/json,.json" class="hidden" onchange="importCycleBackupFile(event)">
         <pre id="briefPreview" class="hidden"></pre>
@@ -282,7 +283,7 @@
     <button id="floatingNoteBtn" onclick="event.stopPropagation();toggleFloatingNote()">展开</button>
   </div>
   <div class="floatingNoteBody">
-    <textarea id="floatingSessionNote" placeholder="训练中随手记：疼痛、卡顿、状态、下次调整……" oninput="saveFloatingNote()"></textarea>
+    <textarea id="floatingSessionNote" placeholder="训练中随手记：疼痛、卡顿、状态、下次调整……" oninput="saveSessionNoteFromInput(this)"></textarea>
     <div class="noteMiniTools">
       <button type="button" onclick="keepFloatingNoteForNext()">保留到下一练</button>
       <button type="button" class="bad" onclick="clearFloatingNoteDraft()">清空本次记录</button>
@@ -345,10 +346,10 @@
 <div id="timerToast" class="timerToast"></div>
 <div id="timerConfirmMask" class="timerConfirmMask"><div class="timerConfirmBox"><h3 id="timerConfirmTitle">倒计时结束</h3><p id="timerConfirmBody">可以开始下一步。</p><button type="button" onclick="closeTimerConfirm()">确认</button></div></div>
 
-<script src="storage.js"></script>
-<script src="templates.js"></script>
-<script src="parser.js"></script>
-<script src="importer.js"></script>
-<script src="app.js"></script>
+<script src="storage.js?v=20260520-fix4"></script>
+<script src="templates.js?v=20260520-fix4"></script>
+<script src="parser.js?v=20260520-fix4"></script>
+<script src="importer.js?v=20260520-fix4"></script>
+<script src="app.js?v=20260520-fix4"></script>
 </body>
 </html>

@@ -11,6 +11,7 @@ if(!state.actualDates) state.actualDates={}; // 训练序号 -> 实际训练发�
 if(!state.customWarmups) state.customWarmups={}; // 按训练目的保存：胸训/腿训/通用
 if(state.selectedCalendarIndex===undefined) state.selectedCalendarIndex=state.currentIndex||0;
 if(state.quickNote===undefined) state.quickNote='';
+if(state.currentSessionNote===undefined) state.currentSessionNote=state.draftNote||state.quickNote||'';
 if(!state.noteArchive) state.noteArchive=[];
 if(state.keepNoteForNext===undefined) state.keepNoteForNext=false;
 if(typeof migrateOldImportedDataIfNeeded === 'function') migrateOldImportedDataIfNeeded();
@@ -68,6 +69,22 @@ function normalizeTemplateKey(x){
     .replace(/[　]/g,'')
     .trim();
 }
+function safeDomId(prefix,index,name){
+  var key=normalizeTemplateKey(name)||'item';
+  key=key.replace(/[^\w\u4e00-\u9fa5]/g,'_').slice(0,48)||'item';
+  return prefix+'_'+(index||0)+'_'+key;
+}
+function scrollToExerciseCard(card){
+  if(!card) return;
+  setTimeout(function(){
+    try{card.scrollIntoView({behavior:'smooth',block:'center'});}catch(e){}
+    try{
+      card.classList.add('ghostDrop');
+      setTimeout(function(){card.classList.remove('ghostDrop');},1200);
+    }catch(e){}
+  },80);
+}
+function showToast(msg){ showTimerToast(msg); }
 function normalizeTplName(x){return String(x||'').trim().replace(/[（）]/g,function(ch){return ch==='（'?'(':')';}).replace(/\s+/g,' ');}
 function exerciseTemplateExists(name){
   var nn=normalizeTemplateKey(name); if(!nn) return true;
@@ -380,7 +397,8 @@ function warmupCardHTML(ex,ei){
   var exists=!!findWarmupActionTemplateByName(ex.name);
   var saveCls=exists?' hidden':'';
   var statusCls=exists?'':' hidden';
-  var html=`<div class="exercise warmCard" draggable="true" ondragstart="dragModuleStart(event)" ondragover="dragModuleOver(event)" ondrop="dropModule(event)" data-warm-card="${ei}">
+  var cardId=safeDomId('warmCard',ei,ex.name);
+  var html=`<div id="${cardId}" class="exercise warmCard" draggable="true" ondragstart="dragModuleStart(event)" ondragover="dragModuleOver(event)" ondrop="dropModule(event)" data-warm-card="${ei}" data-card-id="${cardId}">
     <div class="row between moduleHead">
       <div class="row"><span class="pill">热身/退阶</span><input class="warmName" data-field="warmName" oninput="renderModuleMap();refreshWarmupCardTemplateStatus(this.closest('.warmCard'))" value="${escapeHtml(ex.name)}" placeholder="名称"></div>
       <div class="moduleTools"><button onclick="moveModule(this,-1)">上移</button><button onclick="moveModule(this,1)">下移</button><button class="blue" onclick="openWarmupActionTemplateSwitcher(this)">切换热身</button><button class="blue${saveCls}" data-template-save-warmup="1" onclick="saveWarmupCardAsActionTemplate(this)">保存此动作</button><span class="pill${statusCls}" data-template-status-warmup="1">已在热身库</span><span class="pill">${escapeHtml(ex.line||'手动项目')}</span></div>
@@ -694,9 +712,10 @@ function mainCardHTML(ex,ei,w,custom){
   var exists=!!findExerciseTemplateByName(ex.trackName||ex.name||originalName);
   var saveCls=exists?' hidden':'';
   var statusCls=exists?'':' hidden';
+  var cardId=safeDomId('mainCard',ei,ex.trackName||ex.name||originalName);
   var nameInput = `<div class="nameEditBox"><input class="editableTitle" data-field="mainName" data-original-name="${escapeHtml(originalName)}" value="${escapeHtml(ex.name||originalName)}" placeholder="训练名称" oninput="updateOriginalNameHint(this);renderModuleMap();refreshMainCardTemplateStatus(this.closest('.mainCard'))"><div class="originalNameHint">原计划：${escapeHtml(originalName)}</div></div>`;
   var planSummary=`<div class="planSummary">计划：<b>${setCount}</b> 组 × <b>${escapeHtml(repTxt||'-')}</b> 次${rirTxt?'｜余力 <b>'+escapeHtml(rirTxt)+'</b>':''}</div>`;
-  var html=`<div class="exercise mainCard" data-plan-sets="${setCount}" data-plan-reps="${escapeHtml(repTxt)}" data-plan-rir="${escapeHtml(rirTxt)}" data-original-name="${escapeHtml(originalName)}" data-track-name="${escapeHtml(ex.trackName||ex.name||originalName)}" draggable="true" ondragstart="dragModuleStart(event)" ondragover="dragModuleOver(event)" ondrop="dropModule(event)" ${custom?'data-custom-main="1"':''}>
+  var html=`<div id="${cardId}" class="exercise mainCard" data-card-id="${cardId}" data-plan-sets="${setCount}" data-plan-reps="${escapeHtml(repTxt)}" data-plan-rir="${escapeHtml(rirTxt)}" data-original-name="${escapeHtml(originalName)}" data-track-name="${escapeHtml(ex.trackName||ex.name||originalName)}" draggable="true" ondragstart="dragModuleStart(event)" ondragover="dragModuleOver(event)" ondrop="dropModule(event)" ${custom?'data-custom-main="1"':''}>
     <div class="row between moduleHead">
       <div class="row">${nameInput}</div>
       <div class="moduleTools"><button onclick="moveModule(this,-1)">上移</button><button onclick="moveModule(this,1)">下移</button><button class="blue" onclick="openExerciseTemplateSwitcher(this)">切换动作</button><button class="blue${saveCls}" data-template-save-main="1" onclick="saveMainCardAsTemplate(this)">保存此动作</button><span class="pill${statusCls}" data-template-status-main="1">已在动作库</span>${custom?'<button class="bad" onclick="removeMainProject(this)">删除</button>':''}<span class="pill">${escapeHtml(ex.line||'手动项目')}</span></div>
@@ -862,18 +881,24 @@ function switchExerciseTemplate(id){
   tmp.innerHTML=mainCardHTML(ex,idx,getWorkout(),true);
   var newCard=tmp.firstElementChild;
   card.parentNode.replaceChild(newCard,card);
+  closeExerciseTemplateModal();
   if(newCard && tpl.sets){
-    var rows=Array.prototype.slice.call(newCard.querySelectorAll('.mainSets .setrow'));
-    tpl.sets.forEach(function(st,i){
-      var row=rows[i]; if(!row) return;
-      var set=function(sel,val){var el=row.querySelector(sel); if(el){el.value=(val==null?'':val); if(el.type==='range') updateRestLabel(el);}};
-      set('[data-field="weight"]',st.weight); set('[data-field="unit"]',st.unit||'kg'); set('[data-field="reps"]',st.reps); set('[data-field="rir"]',st.rir); set('[data-field="duration"]',st.duration);
-      set('input[type=range]',st.rest||120);
-      var dt=row.querySelector('.actionTimer'); if(dt) dt.textContent=st.duration?fmt(parseInt(st.duration)): '--:--';
-    });
+    try{
+      var rows=Array.prototype.slice.call(newCard.querySelectorAll('.mainSets .setrow'));
+      tpl.sets.forEach(function(st,i){
+        var row=rows[i]; if(!row) return;
+        var set=function(sel,val){var el=row.querySelector(sel); if(el){el.value=(val==null?'':val); if(el.type==='range') updateRestLabel(el);}};
+        set('[data-field="weight"]',st.weight); set('[data-field="unit"]',st.unit||'kg'); set('[data-field="reps"]',st.reps); set('[data-field="rir"]',st.rir); set('[data-field="duration"]',st.duration);
+        set('input[type=range]',st.rest||120);
+        var dt=row.querySelector('.actionTimer'); if(dt) dt.textContent=st.duration?fmt(parseInt(st.duration)): '--:--';
+      });
+    }catch(e){console.error('切换动作后填充组数据失败',e);}
   }
-  bindTrainingDataInputs(document);
-  clearExerciseTemplateSwitchTarget(); closeExerciseTemplateModal(); renderModuleMap(); updateKpis(); saveState();
+  try{bindTrainingDataInputs(document);}catch(e){console.error('切换动作后绑定输入失败',e);}
+  try{renderModuleMap(); updateKpis();}catch(e){console.error('切换动作后刷新失败',e);}
+  saveState();
+  scrollToExerciseCard(newCard);
+  showToast('已切换为：'+(tpl.name||'动作'));
 }
 
 function closeExerciseTemplateModal(){
@@ -912,18 +937,24 @@ function applyExerciseTemplate(id){
   var ex={name:tpl.name, originalName:tpl.trackName||tpl.name, trackName:tpl.trackName||tpl.name, line:'动作模板', sets:(tpl.sets&&tpl.sets.length)||1, reps:tpl.planReps||((tpl.sets&&tpl.sets[0]&&tpl.sets[0].reps)||''), rir:tpl.planRir||((tpl.sets&&tpl.sets[0]&&tpl.sets[0].rir)||'')};
   wrap.insertAdjacentHTML('beforeend', mainCardHTML(ex,n,getWorkout(),true));
   var card=wrap.querySelector('.mainCard:last-child');
+  closeExerciseTemplateModal();
   if(card && tpl.sets){
-    var rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow'));
-    tpl.sets.forEach(function(st,idx){
-      var row=rows[idx]; if(!row) return;
-      var set=function(sel,val){var el=row.querySelector(sel); if(el){el.value=(val==null?'':val); if(el.type==='range') updateRestLabel(el);}};
-      set('[data-field="weight"]',st.weight); set('[data-field="unit"]',st.unit||'kg'); set('[data-field="reps"]',st.reps); set('[data-field="rir"]',st.rir); set('[data-field="duration"]',st.duration);
-      set('input[type=range]',st.rest||120);
-      var dt=row.querySelector('.actionTimer'); if(dt) dt.textContent=st.duration?fmt(parseInt(st.duration)): '--:--';
-    });
+    try{
+      var rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow'));
+      tpl.sets.forEach(function(st,idx){
+        var row=rows[idx]; if(!row) return;
+        var set=function(sel,val){var el=row.querySelector(sel); if(el){el.value=(val==null?'':val); if(el.type==='range') updateRestLabel(el);}};
+        set('[data-field="weight"]',st.weight); set('[data-field="unit"]',st.unit||'kg'); set('[data-field="reps"]',st.reps); set('[data-field="rir"]',st.rir); set('[data-field="duration"]',st.duration);
+        set('input[type=range]',st.rest||120);
+        var dt=row.querySelector('.actionTimer'); if(dt) dt.textContent=st.duration?fmt(parseInt(st.duration)): '--:--';
+      });
+    }catch(e){console.error('调用动作后填充组数据失败',e);}
   }
-  bindTrainingDataInputs(document);
-  closeExerciseTemplateModal(); renderModuleMap(); updateKpis();
+  try{bindTrainingDataInputs(document);}catch(e){console.error('调用动作后绑定输入失败',e);}
+  try{renderModuleMap(); updateKpis();}catch(e){console.error('调用动作后刷新失败',e);}
+  saveState();
+  scrollToExerciseCard(card);
+  showToast('已调用：'+(tpl.name||'动作'));
 }
 function renameExerciseTemplate(id){
   var tpl=ensureExerciseTemplates().find(function(t){return t.id===id;}); if(!tpl) return;
@@ -1022,10 +1053,10 @@ function fillWarmupCardFromTemplate(card,tpl){
   (tpl.sets||[]).forEach(function(st,i){var row=rows[i]; if(!row)return; var set=function(sel,val){var el=row.querySelector(sel); if(el){el.value=(val==null?'':val); if(el.type==='range') updateRestLabel(el);}}; set('[data-field="weight"]',st.weight); set('[data-field="unit"]',st.unit||'kg'); set('[data-field="reps"]',st.reps); set('[data-field="rir"]',st.rir); set('[data-field="duration"]',st.duration); set('input[type=range]',st.rest||30); var dt=row.querySelector('.actionTimer'); if(dt)dt.textContent=st.duration?fmt(parseInt(st.duration)):'--:--';});
 }
 function applyWarmupActionTemplate(id){
-  var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var wrap=document.getElementById('warmupExercises'); if(!wrap)return; if(wrap.querySelector('pre'))wrap.innerHTML=''; var idx=wrap.querySelectorAll('.warmCard').length; wrap.insertAdjacentHTML('beforeend',warmupTemplateToCardHTML(tpl,idx)); fillWarmupCardFromTemplate(wrap.querySelector('.warmCard:last-child'),tpl); closeWarmupActionTemplateModal(); renderModuleMap(); updateKpis();
+  var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var wrap=document.getElementById('warmupExercises'); if(!wrap)return; if(wrap.querySelector('pre'))wrap.innerHTML=''; var idx=wrap.querySelectorAll('.warmCard').length; wrap.insertAdjacentHTML('beforeend',warmupTemplateToCardHTML(tpl,idx)); var card=wrap.querySelector('.warmCard:last-child'); closeWarmupActionTemplateModal(); try{fillWarmupCardFromTemplate(card,tpl);}catch(e){console.error('调用热身后填充组数据失败',e);} try{bindTrainingDataInputs(document);}catch(e){console.error('调用热身后绑定输入失败',e);} try{renderModuleMap(); updateKpis();}catch(e){console.error('调用热身后刷新失败',e);} saveState(); scrollToExerciseCard(card); showToast('已调用：'+(tpl.name||'热身'));
 }
 function switchWarmupActionTemplate(id){
-  var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var card=warmupActionTemplateSwitchTarget; if(!card||!document.body.contains(card)){applyWarmupActionTemplate(id);return;} var idx=Array.prototype.slice.call(document.querySelectorAll('#warmupExercises .warmCard')).indexOf(card); var tmp=document.createElement('div'); tmp.innerHTML=warmupTemplateToCardHTML(tpl,idx); var newCard=tmp.firstElementChild; card.parentNode.replaceChild(newCard,card); fillWarmupCardFromTemplate(newCard,tpl); closeWarmupActionTemplateModal(); renderModuleMap(); updateKpis();
+  var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var card=warmupActionTemplateSwitchTarget; if(!card||!document.body.contains(card)){applyWarmupActionTemplate(id);return;} var idx=Array.prototype.slice.call(document.querySelectorAll('#warmupExercises .warmCard')).indexOf(card); var tmp=document.createElement('div'); tmp.innerHTML=warmupTemplateToCardHTML(tpl,idx); var newCard=tmp.firstElementChild; card.parentNode.replaceChild(newCard,card); closeWarmupActionTemplateModal(); try{fillWarmupCardFromTemplate(newCard,tpl);}catch(e){console.error('切换热身后填充组数据失败',e);} try{bindTrainingDataInputs(document);}catch(e){console.error('切换热身后绑定输入失败',e);} try{renderModuleMap(); updateKpis();}catch(e){console.error('切换热身后刷新失败',e);} saveState(); scrollToExerciseCard(newCard); showToast('已切换为：'+(tpl.name||'热身'));
 }
 function editWarmupActionTemplateCategory(id){var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var cat=prompt('分类：足踝 / 髋 / 胸椎 / 肩胛 / 肩袖 / 核心 / 下肢 / 上肢 / 通用',tpl.category||inferWarmupCategory(tpl.name)); if(cat===null)return; tpl.category=(cat||inferWarmupCategory(tpl.name)).trim(); tpl.updatedAt=new Date().toISOString(); saveState(); renderWarmupActionTemplateList();}
 function renameWarmupActionTemplate(id){var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var name=prompt('热身动作名称',tpl.name||''); if(name===null)return; tpl.name=(name||tpl.name).trim(); if(!tpl.category)tpl.category=inferWarmupCategory(tpl.name); tpl.updatedAt=new Date().toISOString(); dedupeTemplateLibraries(); saveState(); renderWarmupActionTemplateList(); refreshAllTemplateStatuses();}
@@ -1111,7 +1142,8 @@ function rebuild(){
   document.getElementById('warmupInput').value = state.customWarmups[warmKey] || defaultWarmupText(w);
   document.getElementById('warmupBox').textContent = warmupFor(w['热身模板']);
   parseAndRenderWarmups(false);
-  document.getElementById('sessionNote').value = state.draftNote||''; var fsn=document.getElementById('floatingSessionNote'); if(fsn) fsn.value=state.quickNote||state.draftNote||'';
+  renderNoteInputs();
+  renderCompleteDebugStatus();
   var html='';
   exs.forEach(function(ex,ei){ html+=mainCardHTML(ex,ei,w,false); });
   document.getElementById('exercises').innerHTML=html || '<pre>休息/轻活动：今天不需要正式训练。</pre>';
@@ -1209,24 +1241,50 @@ function collectEntries(){
   return entries;
 }
 
+function getCurrentSessionNote(){
+  return state.currentSessionNote||state.draftNote||state.quickNote||'';
+}
+function renderNoteInputs(){
+  var value=getCurrentSessionNote();
+  var f=document.getElementById('floatingSessionNote');
+  var sNote=document.getElementById('sessionNote');
+  if(f && f.value!==value) f.value=value;
+  if(sNote && sNote.value!==value) sNote.value=value;
+}
+function setCurrentSessionNote(value,opts){
+  value=String(value||'');
+  state.currentSessionNote=value;
+  state.draftNote=value;
+  state.quickNote=value;
+  renderNoteInputs();
+  if(!opts || !opts.noSave) saveState();
+  return value;
+}
 function syncFloatingNote(){
   var f=document.getElementById('floatingSessionNote');
   var sNote=document.getElementById('sessionNote');
-  if(f){ state.quickNote=f.value||''; if(sNote && sNote.value!==f.value) sNote.value=f.value; }
+  var active=document.activeElement;
+  var value=getCurrentSessionNote();
+  if(active===f) value=f.value||'';
+  else if(active===sNote) value=sNote.value||'';
+  else if(sNote) value=sNote.value||'';
+  else if(f) value=f.value||'';
+  return setCurrentSessionNote(value,{noSave:true});
 }
-function saveFloatingNote(){ syncFloatingNote(); state.draftNote=state.quickNote||''; saveState(); }
+function saveSessionNoteFromInput(el){
+  setCurrentSessionNote(el&&el.value?el.value:'');
+}
+function saveFloatingNote(){ syncFloatingNote(); saveState(); }
 function keepFloatingNoteForNext(){
   syncFloatingNote();
   state.keepNoteForNext=true;
-  state.draftNote=state.quickNote||'';
   saveState();
   alert('已设置：这条本次训练记录会保留到下一练。');
 }
 function clearFloatingNoteDraft(){
   if(!confirm('确认清空当前浮动记录？已完成训练里的历史归档不会删除。')) return;
-  state.quickNote=''; state.draftNote=''; state.keepNoteForNext=false;
-  var f=document.getElementById('floatingSessionNote'); if(f) f.value='';
-  var sNote=document.getElementById('sessionNote'); if(sNote) sNote.value='';
+  state.keepNoteForNext=false;
+  setCurrentSessionNote('',{noSave:true});
   saveState();
 }
 function archiveSessionNote(log){
@@ -1305,19 +1363,20 @@ function initFloatingNoteDrag(){
   window.addEventListener('resize',function(){setTimeout(clampFloatingNote,80);});
 }
 
-function saveProgress(){ markCurrentTrainingToday({noSave:true}); autoSaveWarmupDraft(); syncFloatingNote(); state.draftNote=document.getElementById('sessionNote').value; saveState(); alert('已保存当前输入、热身项目和实际训练日期。');}
+function saveProgress(){ markCurrentTrainingToday({noSave:true}); autoSaveWarmupDraft(); syncFloatingNote(); saveState(); alert('已保存当前输入、热身项目和实际训练日期。');}
 function finishWorkout(){
   markCurrentTrainingToday({noSave:true});
   let w=getWorkout(); let entries=collectEntries();
   let logDate=actualDateFor(state.currentIndex) || localDateString();
-  var logObj={date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:'已完成', note:document.getElementById('sessionNote').value, entries};
+  var note=syncFloatingNote();
+  var logObj={date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:'已完成', note:note, entries};
   state.logs.push(logObj); archiveSessionNote(logObj);
   state.completed = state.completed||{}; state.completed[state.currentIndex]=true;
   state.currentIndex=Math.min(state.currentIndex+1,PLAN.length-1);
-  if(state.keepNoteForNext){state.draftNote=state.quickNote||'';}else{state.draftNote='';state.quickNote='';}
+  if(!state.keepNoteForNext) setCurrentSessionNote('',{noSave:true});
   state.keepNoteForNext=false; saveState(); rebuild(); alert('已完成，并推进到下一练。');
 }
-function skipWorkout(){ state.draftNote=''; saveState(); alert('已顺延：当前训练不会推进，下一次打开仍是这一练。');}
+function skipWorkout(){ setCurrentSessionNote('',{noSave:true}); saveState(); alert('已顺延：当前训练不会推进，下一次打开仍是这一练。');}
 function prevWorkout(){state.currentIndex=Math.max(0,state.currentIndex-1);saveState();rebuild();}
 function nextWorkout(){state.currentIndex=Math.min(PLAN.length-1,state.currentIndex+1);saveState();rebuild();}
 function doneSet(id,rest){startRowTimer(id,rest);}
@@ -1644,7 +1703,7 @@ function outdoorNoTrainingToday(){
   state.dateAnchors=state.dateAnchors||{};
   state.dateAnchors[state.currentIndex]=next;
   if(inp) inp.value=next;
-  state.draftNote=(state.draftNote||'')+'\n[日期顺推] 今日外出无训练，训练内容保留到下一训练日。';
+  setCurrentSessionNote((getCurrentSessionNote()||'')+'\n[日期顺推] 今日外出无训练，训练内容保留到下一训练日。',{noSave:true});
   saveState();
   rebuild();
   alert('已顺推一天：训练序号不变，当前训练保留到 '+next+'。');
@@ -1780,9 +1839,9 @@ function buildWorkoutLogFromCurrent(){
   autoSaveWarmupDraft();
   var w=getWorkout();
   var entries=collectEntries();
-  var noteEl=document.getElementById('sessionNote');
+  var note=syncFloatingNote();
   var logDate=actualDateFor(state.currentIndex) || localDateString();
-  return {date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:'已完成', note:noteEl?noteEl.value:'', entries:entries};
+  return {date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:'已完成', note:note, entries:entries};
 }
 function pad2(n){return String(n).padStart(2,'0');}
 function formatEntryLine(e){
@@ -1836,6 +1895,20 @@ function showBrief(text){
   box.classList.remove('hidden');
   try{box.scrollIntoView({behavior:'smooth',block:'nearest'});}catch(e){}
 }
+function setCompleteDebugStatus(status,error){
+  state.lastCompleteStatus=status||'暂无';
+  state.lastCompleteError=error||'';
+  state.lastCompleteAt=new Date().toISOString();
+  renderCompleteDebugStatus();
+}
+function renderCompleteDebugStatus(){
+  var box=document.getElementById('completeDebugStatus');
+  if(!box) return;
+  var status=state.lastCompleteStatus||'暂无';
+  var at=state.lastCompleteAt?('｜'+state.lastCompleteAt.replace('T',' ').slice(0,19)):'';
+  var err=state.lastCompleteError||'无';
+  box.innerHTML='最近操作状态：上次完成训练：'+escapeHtml(status)+escapeHtml(at)+'<br>错误信息：'+escapeHtml(err);
+}
 function previewCurrentBrief(){showBrief(buildBriefText(buildWorkoutLogFromCurrent()));}
 function copyTextToClipboard(text){
   if(navigator.clipboard && navigator.clipboard.writeText){
@@ -1883,38 +1956,64 @@ function getBackupFileName(refLog){
   return formatBackupDateForName(dateStr)+'-'+cleanFilePart(title)+'-（总存档）.json';
 }
 function downloadCycleBackupFile(silent,refLog){
-  var data=JSON.stringify(buildCycleBackupObject(),null,2);
-  var blob=new Blob([data],{type:'application/json'});
-  var a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=getBackupFileName(refLog);
-  document.body.appendChild(a);a.click();document.body.removeChild(a);
-  setTimeout(function(){try{URL.revokeObjectURL(a.href);}catch(e){}},1000);
-  if(!silent) alert('已导出周期备份：'+a.download);
+  try{
+    var data=JSON.stringify(buildCycleBackupObject(),null,2);
+    var blob=new Blob([data],{type:'application/json'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=getBackupFileName(refLog);
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(function(){try{URL.revokeObjectURL(a.href);}catch(e){}},1000);
+    if(!silent) alert('已导出周期备份：'+a.download);
+    return a.download;
+  }catch(e){
+    console.error('周期备份导出失败',e);
+    if(!silent) alert('周期备份导出失败：'+(e&&e.message?e.message:e));
+    throw e;
+  }
 }
 function finishWorkoutCompleteBackup(){
-  syncFloatingNote();
-  var log=buildWorkoutLogFromCurrent();
-  var brief=buildBriefText(log);
-  state.logs.push(log);
-  archiveSessionNote(log);
-  state.completed = state.completed||{};
-  state.completed[state.currentIndex]=true;
-  state.lastBrief=brief;
-  state.lastBackupAt=new Date().toISOString();
-  state.currentIndex=Math.min(state.currentIndex+1,PLAN.length-1);
-  if(state.keepNoteForNext){
-    state.draftNote=state.quickNote||'';
-  }else{
-    state.draftNote='';
-    state.quickNote='';
+  console.log('[complete] click');
+  var log=null, brief='';
+  try{
+    console.log('[complete] save log start');
+    syncFloatingNote();
+    log=buildWorkoutLogFromCurrent();
+    brief=buildBriefText(log);
+    state.logs.push(log);
+    archiveSessionNote(log);
+    console.log('[complete] mark completed');
+    state.completed = state.completed||{};
+    state.completed[state.currentIndex]=true;
+    state.lastBrief=brief;
+    state.lastBackupAt=new Date().toISOString();
+    console.log('[complete] move next');
+    state.currentIndex=Math.min(state.currentIndex+1,PLAN.length-1);
+    if(!state.keepNoteForNext) setCurrentSessionNote('',{noSave:true});
+    state.keepNoteForNext=false;
+    setCompleteDebugStatus('成功','');
+    saveState();
+    showBrief(brief);
+    rebuild();
+    showToast('已完成今日训练，已进入下一练');
+    try{
+      console.log('[complete] backup start');
+      downloadCycleBackupFile(true,log);
+      showToast('已完成今日训练，已进入下一练。总存档已导出。');
+      console.log('[complete] done');
+    }catch(backupError){
+      console.error('备份导出失败',backupError);
+      setCompleteDebugStatus('成功','自动备份失败：'+(backupError&&backupError.message?backupError.message:backupError));
+      saveState();
+      showToast('训练已完成，但自动备份失败，请手动导出周期备份');
+      alert('已完成今日训练，已进入下一练。\n但自动备份失败，请点击“手动导出周期备份”。');
+    }
+  }catch(error){
+    console.error('[complete] failed',error);
+    setCompleteDebugStatus('失败',error&&error.message?error.message:String(error));
+    saveState();
+    alert('完成训练失败：'+(error&&error.message?error.message:error));
   }
-  state.keepNoteForNext=false;
-  saveState();
-  showBrief(brief);
-  downloadCycleBackupFile(true,log);
-  rebuild();
-  alert('已完成：已进入下一练，并生成周期备份文件。');
 }
 function buildCycleBackupObject(){
   var importedPlan=null, importedWarmups=null;
@@ -1924,7 +2023,7 @@ function buildCycleBackupObject(){
 }
 function exportCycleBackup(){
   autoSaveWarmupDraft();
-  state.draftNote=document.getElementById('sessionNote')?document.getElementById('sessionNote').value:'';
+  syncFloatingNote();
   state.lastBackupAt=new Date().toISOString();
   saveState();
   downloadCycleBackupFile(false);
@@ -1945,6 +2044,9 @@ function importCycleBackupFile(ev){
       if(!state.dateAnchors) state.dateAnchors={};
       if(!state.actualDates) state.actualDates={};
       if(!state.settings) state.settings={mainRest:180,assistRest:90};
+      if(state.currentSessionNote===undefined) state.currentSessionNote=state.draftNote||state.quickNote||'';
+      state.draftNote=state.currentSessionNote||'';
+      state.quickNote=state.currentSessionNote||'';
       ensureDateMigration();
       saveState();
       if(obj.importedPlan) localStorage.setItem(KEY+'_importedPlan', JSON.stringify(obj.importedPlan));
