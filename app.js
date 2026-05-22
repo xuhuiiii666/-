@@ -329,14 +329,35 @@ function getLastExercisePerformance(exerciseName){
 function currentDraftKey(){
   return String(Math.max(0,Math.min(PLAN.length-1,Number(state.currentIndex)||0)));
 }
+function createSetId(prefix){
+  return (prefix||'set')+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8);
+}
+function normalizeSetNumbersInDom(scope){
+  var rows=Array.prototype.slice.call((scope||document).querySelectorAll('.setrow'));
+  var total=rows.length;
+  rows.forEach(function(row,idx){
+    var no=idx+1;
+    row.setAttribute('data-set-no',no);
+    row.querySelectorAll('[data-set]').forEach(function(el){el.setAttribute('data-set',no);});
+    var label=row.querySelector('label');
+    if(label){
+      var isMain=!!row.closest('.mainCard');
+      label.textContent=isMain?('第'+no+'/'+total+'组'):('第'+no+'组');
+    }
+  });
+}
 function readSetRow(row){
   row=row||{};
   var get=function(sel){var x=row.querySelector&&row.querySelector(sel);return x?x.value:'';};
   var range=row.querySelector&&row.querySelector('input[type=range]');
-  return {weight:get('[data-field="weight"]'),unit:get('[data-field="unit"]')||'kg',reps:get('[data-field="reps"]'),rir:get('[data-field="rir"]'),duration:get('[data-field="duration"]'),rest:range?range.value:''};
+  var id=row.getAttribute&&row.getAttribute('data-set-id');
+  if(!id){ id=createSetId(row.closest&&row.closest('.warmCard')?'warm':'main'); if(row.setAttribute) row.setAttribute('data-set-id',id); }
+  return {setId:id,setNo:parseInt(row.getAttribute('data-set-no')||row.getAttribute('data-set')||'0',10)||0,weight:get('[data-field="weight"]'),unit:get('[data-field="unit"]')||'kg',reps:get('[data-field="reps"]'),rir:get('[data-field="rir"]'),duration:get('[data-field="duration"]'),rest:Number(range?range.value:90)||90,note:'',completed:row.classList&&row.classList.contains('done'),timerState:(rowTimers[id]&&rowTimers[id].running)?'running':'idle'};
 }
 function writeSetRow(row,data){
   if(!row||!data) return;
+  if(data.setId) row.setAttribute('data-set-id',data.setId);
+  if(data.setNo) row.setAttribute('data-set-no',data.setNo);
   var set=function(sel,val){var x=row.querySelector(sel); if(x&&val!==undefined){x.value=val==null?'':val; if(x.type==='range') updateRestLabel(x);}};
   set('[data-field="weight"]',data.weight);
   set('[data-field="unit"]',data.unit||'kg');
@@ -346,6 +367,18 @@ function writeSetRow(row,data){
   set('input[type=range]',data.rest);
   var dt=row.querySelector('.actionTimer');
   if(dt) dt.textContent=data.duration?fmt(parseInt(data.duration,10)||0):'--:--';
+}
+function getDraftSetByDomId(id){
+  var draft=state.currentWorkoutDrafts&&state.currentWorkoutDrafts[currentDraftKey()];
+  if(!draft||!id) return null;
+  var all=[].concat(draft.warmups||[],draft.mains||[]);
+  for(var i=0;i<all.length;i++){
+    var sets=all[i].sets||[];
+    for(var j=0;j<sets.length;j++){
+      if(sets[j].setId===id) return sets[j];
+    }
+  }
+  return null;
 }
 function captureCurrentWorkoutDraft(){
   state.currentWorkoutDrafts=state.currentWorkoutDrafts||{};
@@ -366,14 +399,29 @@ function restoreCurrentWorkoutDraft(){
   (draft.warmups||[]).forEach(function(saved,idx){
     var card=document.querySelectorAll('#warmupExercises .warmCard')[idx]; if(!card) return;
     var name=card.querySelector('[data-field="warmName"]'); if(name&&saved.name) name.value=saved.name;
+    var wrap=card.querySelector('.warmSets');
     var rows=Array.prototype.slice.call(card.querySelectorAll('.warmSets .setrow'));
+    while(wrap && rows.length<(saved.sets||[]).length){
+      var st=(saved.sets||[])[rows.length]||{};
+      wrap.insertAdjacentHTML('beforeend',warmupSetHTML(idx,rows.length+1,st.reps||'',st.rest||30,st.duration||'',st.setId));
+      rows=Array.prototype.slice.call(card.querySelectorAll('.warmSets .setrow'));
+    }
     (saved.sets||[]).forEach(function(st,i){ if(rows[i]) writeSetRow(rows[i],st); });
+    if(wrap) normalizeSetNumbersInDom(wrap);
   });
   (draft.mains||[]).forEach(function(saved,idx){
     var card=document.querySelectorAll('#exercises .mainCard')[idx]; if(!card) return;
     var name=card.querySelector('[data-field="mainName"]'); if(name&&saved.name) name.value=saved.name;
+    var wrap=card.querySelector('.mainSets');
     var rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow'));
+    while(wrap && rows.length<(saved.sets||[]).length){
+      var st=(saved.sets||[])[rows.length]||{};
+      var custom=card.hasAttribute('data-custom-main');
+      wrap.insertAdjacentHTML('beforeend',mainSetHTML(idx,rows.length+1,st.reps||'',st.rir||'',{min:60,max:240,def:st.rest||120,label:custom?'自定':'辅助'},st.duration||'',custom,(saved.sets||[]).length,st.setId));
+      rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow'));
+    }
     (saved.sets||[]).forEach(function(st,i){ if(rows[i]) writeSetRow(rows[i],st); });
+    if(wrap) normalizeSetNumbersInDom(wrap);
   });
 }
 function clearCurrentWorkoutDraft(index){
@@ -539,9 +587,10 @@ function parseWarmupItems(text){
 }
 function warmupRestControlHTML(id,sec){return restControlHTML(id,{min:15,max:120,def:sec||30,label:'热身'});}
 function durationControlHTML(id,sec){let v=sec||'';return `<div class="actionCell" id="act_${id}"><div class="actionInner"><input data-field="duration" placeholder="动作倒计时/秒，可空" type="number" step="1" value="${v}"><button class="actionBtn" onclick="startDurationTimer('${id}')">开始动作倒计时</button></div><div class="actionTimer" id="dt_${id}">${v?fmt(parseInt(v)): '--:--'}</div></div>`;}
-function warmupSetHTML(ei,s,reps,rest,duration){
-  let id=`w${ei}s${s}_${Date.now()}_${Math.floor(Math.random()*999)}`;
-  return `<div class="setrow warmSet" id="row_${id}" data-warm-row="1" data-warm="${ei}" data-set="${s}">
+function warmupSetHTML(ei,s,reps,rest,duration,setId){
+  let id=setId||createSetId('w'+ei);
+  rest=Number(rest||30)||30;
+  return `<div class="setrow warmSet" id="row_${id}" data-set-id="${id}" data-set-no="${s}" data-warm-row="1" data-warm="${ei}" data-set="${s}">
     <label>第${s}组</label>
     <div class="liftLine">
       <input data-field="weight" placeholder="重量" type="number" step="0.5">
@@ -598,9 +647,17 @@ function addWarmupSet(btn){
   let card=btn.closest('.warmCard'), sets=card.querySelector('.warmSets');
   let ei=[...document.querySelectorAll('.warmCard')].indexOf(card);
   let n=sets.querySelectorAll('.warmSet').length+1;
-  sets.insertAdjacentHTML('beforeend', warmupSetHTML(ei,n,'',30,''));
-  renumberSetRows(sets);
+  let last=sets.querySelector('.warmSet:last-child');
+  let reps=last?last.querySelector('[data-field="reps"]')?.value:'';
+  let rir=last?last.querySelector('[data-field="rir"]')?.value:'';
+  let duration=last?last.querySelector('[data-field="duration"]')?.value:'';
+  let rest=last?parseInt(last.querySelector('input[type=range]')?.value||30,10):30;
+  sets.insertAdjacentHTML('beforeend', warmupSetHTML(ei,n,reps,rest,duration));
+  let row=sets.querySelector('.warmSet:last-child');
+  if(row){let r=row.querySelector('[data-field="rir"]'); if(r)r.value=rir||'';}
+  normalizeSetNumbersInDom(sets);
   bindTrainingDataInputs(document);
+  captureCurrentWorkoutDraft(); saveState();
 }
 function duplicateWarmupSet(btn){
   let card=btn.closest('.warmCard'), sets=card.querySelector('.warmSets');
@@ -608,11 +665,20 @@ function duplicateWarmupSet(btn){
   let reps=last?last.querySelector('[data-field="reps"]').value:'';
   let rest=last?parseInt(last.querySelector('input[type=range]')?.value||30):30;
   let duration=last?last.querySelector('[data-field="duration"]')?.value:'';
+  let weight=last?last.querySelector('[data-field="weight"]')?.value:'';
+  let unit=last?last.querySelector('[data-field="unit"]')?.value:'kg';
+  let rir=last?last.querySelector('[data-field="rir"]')?.value:'';
   let ei=[...document.querySelectorAll('.warmCard')].indexOf(card);
   let n=sets.querySelectorAll('.warmSet').length+1;
   sets.insertAdjacentHTML('beforeend', warmupSetHTML(ei,n,reps,rest,duration));
-  renumberSetRows(sets);
+  let row=sets.querySelector('.warmSet:last-child');
+  if(row){
+    let set=function(sel,val){let x=row.querySelector(sel); if(x)x.value=val||'';};
+    set('[data-field="weight"]',weight); set('[data-field="unit"]',unit); set('[data-field="rir"]',rir);
+  }
+  normalizeSetNumbersInDom(sets);
   bindTrainingDataInputs(document);
+  captureCurrentWorkoutDraft(); saveState();
 }
 function renumberSetRows(scope){
   var rows=scope?Array.prototype.slice.call(scope.querySelectorAll('.setrow')):[];
@@ -628,14 +694,23 @@ function renumberSetRows(scope){
     row.querySelectorAll('[data-set]').forEach(function(el){el.setAttribute('data-set', n);});
   });
 }
+function cleanupSetTimer(id){
+  if(!id) return;
+  if(activeTimerContext&&activeTimerContext.id===id){
+    clearInterval(timerId);
+    activeTimerContext=null;
+    activeSet=null;
+  }
+  delete rowTimers[id];
+}
 function removeWarmupSet(btn){
   let row=btn.closest('.warmSet');
-  if(row){ var wrap=row.closest('.warmSets'); row.remove(); renumberSetRows(wrap); }
+  if(row){ var wrap=row.closest('.warmSets'); if(wrap&&wrap.querySelectorAll('.warmSet').length<=1){alert('至少保留一组');return;} cleanupSetTimer(row.getAttribute('data-set-id')||String(row.id||'').replace(/^row_/,'')); row.remove(); normalizeSetNumbersInDom(wrap); captureCurrentWorkoutDraft(); saveState(); }
   updateKpis();
 }
 function removeMainSet(btn){
   var row=btn.closest('.setrow');
-  if(row){ var wrap=row.closest('.mainSets'); row.remove(); renumberSetRows(wrap); }
+  if(row){ var wrap=row.closest('.mainSets'); if(wrap&&wrap.querySelectorAll('.setrow').length<=1){alert('至少保留一组');return;} cleanupSetTimer(row.getAttribute('data-set-id')||String(row.id||'').replace(/^row_/,'')); row.remove(); normalizeSetNumbersInDom(wrap); captureCurrentWorkoutDraft(); saveState(); }
   updateKpis();
 }
 function removeWarmupProject(btn){let card=btn.closest('.warmCard'); if(card) card.remove(); updateKpis(); renderModuleMap();}
@@ -846,12 +921,13 @@ function lastReferenceHTML(name){
   return '<div class="lastRef"><b>上次同名：</b>暂无记录</div>';
 }
 
-function mainSetHTML(ei,s,reps,rir,rest,duration,custom,totalSets){
-  var id=(custom?'c':'e')+ei+'s'+s;
+function mainSetHTML(ei,s,reps,rir,rest,duration,custom,totalSets,setId){
+  var id=setId||createSetId((custom?'c':'e')+ei);
   var rr=rest||{min:90,max:180,def:120,label:'自定'};
+  rr.def=Number(rr.def||120)||120;
   var cleanReps=String(reps||'').split(/[–\-~至]/).pop()||'';
   var totalTxt=totalSets?('/'+totalSets):'';
-  return `<div class="setrow" id="row_${id}" ${custom?'data-custom-main-row="1"':''}>
+  return `<div class="setrow" id="row_${id}" data-set-id="${id}" data-set-no="${s}" ${custom?'data-custom-main-row="1"':''}>
     <label>第${s}${totalTxt}组</label>
     <div class="liftLine">
       <input data-ex="${custom?'custom_'+ei:ei}" data-set="${s}" data-field="weight" placeholder="重量" type="number" step="0.5" value="">
@@ -903,17 +979,32 @@ function addMainSet(btn){
   var custom=card.hasAttribute('data-custom-main');
   var ei=[].slice.call(document.querySelectorAll('#exercises .mainCard')).indexOf(card);
   var n=sets.querySelectorAll('.setrow').length+1;
-  var reps=card.getAttribute('data-plan-reps')||'';
-  var rir=card.getAttribute('data-plan-rir')||'';
-  sets.insertAdjacentHTML('beforeend', mainSetHTML(ei,n,reps,rir,{min:60,max:240,def:120,label:custom?'自定':'辅助'},'',custom,n)); renumberSetRows(sets);
+  var last=sets.querySelector('.setrow:last-child');
+  var reps=last?last.querySelector('[data-field="reps"]')?.value:(card.getAttribute('data-plan-reps')||'');
+  var rir=last?last.querySelector('[data-field="rir"]')?.value:(card.getAttribute('data-plan-rir')||'');
+  var unit=last?last.querySelector('[data-field="unit"]')?.value:'kg';
+  var rest=last?parseInt(last.querySelector('input[type=range]')?.value||120,10):120;
+  var duration=last?last.querySelector('[data-field="duration"]')?.value:'';
+  sets.insertAdjacentHTML('beforeend', mainSetHTML(ei,n,reps,rir,{min:60,max:240,def:rest,label:custom?'自定':'辅助'},duration,custom,n));
+  var row=sets.querySelector('.setrow:last-child'); if(row){var u=row.querySelector('[data-field="unit"]'); if(u)u.value=unit||'kg';}
+  normalizeSetNumbersInDom(sets);
   bindTrainingDataInputs(document);
+  captureCurrentWorkoutDraft(); saveState();
 }
 function duplicateMainSet(btn){
   var card=btn.closest('.mainCard'), sets=card.querySelector('.mainSets'); var last=sets.querySelector('.setrow:last-child'); if(!last){addMainSet(btn);return;}
   var get=function(sel){var x=last.querySelector(sel);return x?x.value:''}; var rest=last.querySelector('input[type=range]');
   var custom=card.hasAttribute('data-custom-main'); var ei=[].slice.call(document.querySelectorAll('#exercises .mainCard')).indexOf(card); var n=sets.querySelectorAll('.setrow').length+1;
   sets.insertAdjacentHTML('beforeend', mainSetHTML(ei,n,get('[data-field="reps"]'),get('[data-field="rir"]'),{min:60,max:240,def:parseInt(rest?rest.value:120),label:custom?'自定':'辅助'},get('[data-field="duration"]'),custom,n)); renumberSetRows(sets);
+  var row=sets.querySelector('.setrow:last-child');
+  if(row){
+    var set=function(sel,val){var x=row.querySelector(sel); if(x)x.value=val||'';};
+    set('[data-field="weight"]',get('[data-field="weight"]'));
+    set('[data-field="unit"]',get('[data-field="unit"]')||'kg');
+  }
+  normalizeSetNumbersInDom(sets);
   bindTrainingDataInputs(document);
+  captureCurrentWorkoutDraft(); saveState();
 }
 function removeMainProject(btn){ var card=btn.closest('.mainCard'); if(card)card.remove(); updateKpis(); renderModuleMap(); }
 
@@ -1304,6 +1395,12 @@ function updateRestValue(id,val){
   let rv=document.getElementById('rv_'+id), mt=document.getElementById('mt_'+id);
   if(rv) rv.textContent=val+'s';
   if(mt && (!rowTimers[id] || !rowTimers[id].running)) mt.textContent=fmt(val);
+  var row=document.getElementById('row_'+id);
+  if(row){
+    row.setAttribute('data-rest',String(val));
+    captureCurrentWorkoutDraft();
+    saveState();
+  }
 }
 function updateRestLabel(input){
   var cell=input&&input.closest?input.closest('.restCell'):null;
@@ -1781,9 +1878,11 @@ function checkModuleComplete(card){
 }
 function startRowTimer(id,forcedRest){
   markCurrentTrainingToday({noSave:true});
+  captureCurrentWorkoutDraft();
   var row=document.getElementById('row_'+id);
   if(row){
     row.classList.add('done');
+    row.setAttribute('data-completed','1');
     setRestButtonStatus(id,'completed');
     markNextSetReady(id);
     checkModuleComplete(row.closest('.exercise'));
@@ -1791,7 +1890,12 @@ function startRowTimer(id,forcedRest){
   if(activeSet){var old=document.getElementById('rest_'+activeSet); if(old)old.classList.remove('restActive');}
   activeSet=id;
   var slider=document.querySelector('#rest_'+id+' input[type=range]');
-  var sec=parseInt(forcedRest || (slider?slider.value:timerBase) || 90);
+  var draftSet=getDraftSetByDomId(id);
+  var sec=parseInt(forcedRest || (draftSet&&draftSet.rest) || (slider?slider.value:timerBase) || 90,10);
+  if(slider && String(slider.value)!==String(sec)){
+    slider.value=sec;
+    updateRestValue(id,sec);
+  }
   rowTimers[id]={left:sec,base:sec,running:true};
   timerBase=sec; timerLeft=sec; renderTimer();
   var box=document.getElementById('rest_'+id); if(box)box.classList.add('restActive');
