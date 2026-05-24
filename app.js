@@ -275,6 +275,7 @@ function buildExerciseHistoryFromLogs(workoutLogs){
     var workoutIndex=getLogIndex(log);
     var grouped={};
     getExerciseItemsFromLog(log).forEach(function(item){
+      if(item.type && !/主训练/.test(String(item.type))) return;
       var rawName=item.trackingName||item.trackName||item.name||item.originalName;
       var key=normalizeExerciseName(rawName);
       if(!key) return;
@@ -284,7 +285,8 @@ function buildExerciseHistoryFromLogs(workoutLogs){
       var itemSets=Array.isArray(item.sets)?item.sets:[item];
       itemSets.forEach(function(st,si){
         st=st||{};
-        var setObj={set:st.set||st.index||st.setIndex||si+1,weight:st.weight||'',unit:st.unit||'kg',weightKg:st.weightKg||weightToKg(st.weight,st.unit||'kg'),reps:st.reps||'',rir:st.rir||st.RIR||'',duration:st.duration||'',rest:st.rest||'',note:st.note||item.note||'',e1rm:st.e1rm||Math.round(e1rm(st.weightKg||weightToKg(st.weight,st.unit||'kg'),st.reps)*10)/10};
+        var weightKg=Number(st.weightKg||weightToKg(st.weight,st.unit||'kg')||0);
+        var setObj={set:st.set||st.index||st.setIndex||si+1,weight:st.weight||'',unit:st.unit||'kg',weightKg:Math.round(weightKg*10)/10,reps:st.reps||'',rir:st.rir||st.RIR||'',duration:st.duration||'',rest:st.rest||'',note:st.note||item.note||'',e1rm:st.e1rm||Math.round(e1rm(weightKg,st.reps)*10)/10};
         if(hasMeaningfulSet(setObj)) grouped[key].sets.push(setObj);
       });
     });
@@ -319,7 +321,7 @@ function getLastExercisePerformance(exerciseName){
     state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs||[]);
     records=state.exerciseHistory[key]||[];
   }
-  var valid=records.filter(function(r){return r&&r.sets&&r.sets.some(hasMeaningfulSet);}).sort(function(a,b){
+  var valid=records.filter(function(r){return r&&r.sets&&r.sets.some(function(s){return Number(s.weightKg)>0 || !!s.weight;});}).sort(function(a,b){
     var da=String(a.date||''), db=String(b.date||'');
     if(da===db) return (b.sourceLogIndex||0)-(a.sourceLogIndex||0);
     return db.localeCompare(da);
@@ -352,7 +354,8 @@ function readSetRow(row){
   var range=row.querySelector&&row.querySelector('input[type=range]');
   var id=row.getAttribute&&row.getAttribute('data-set-id');
   if(!id){ id=createSetId(row.closest&&row.closest('.warmCard')?'warm':'main'); if(row.setAttribute) row.setAttribute('data-set-id',id); }
-  return {setId:id,setNo:parseInt(row.getAttribute('data-set-no')||row.getAttribute('data-set')||'0',10)||0,weight:get('[data-field="weight"]'),unit:get('[data-field="unit"]')||'kg',reps:get('[data-field="reps"]'),rir:get('[data-field="rir"]'),duration:get('[data-field="duration"]'),rest:Number(range?range.value:90)||90,note:'',completed:row.classList&&row.classList.contains('done'),timerState:(rowTimers[id]&&rowTimers[id].running)?'running':'idle'};
+  var weight=get('[data-field="weight"]'), unit=get('[data-field="unit"]')||'kg';
+  return {setId:id,setNo:parseInt(row.getAttribute('data-set-no')||row.getAttribute('data-set')||'0',10)||0,weight:weight,unit:unit,weightKg:Math.round(weightToKg(weight,unit)*10)/10,reps:get('[data-field="reps"]'),rir:get('[data-field="rir"]'),duration:get('[data-field="duration"]'),rest:Number(range?range.value:90)||90,note:'',completed:row.classList&&row.classList.contains('done'),timerState:(rowTimers[id]&&rowTimers[id].running)?'running':'idle'};
 }
 function writeSetRow(row,data){
   if(!row||!data) return;
@@ -380,17 +383,73 @@ function getDraftSetByDomId(id){
   }
   return null;
 }
+function findCurrentSet(exerciseId,setId){
+  var draft=state.currentWorkoutDrafts&&state.currentWorkoutDrafts[currentDraftKey()];
+  if(!draft||!setId) return null;
+  var groups=[];
+  if(exerciseId){
+    groups=groups.concat((draft.warmups||[]).filter(function(x){return x.exerciseId===exerciseId;}));
+    groups=groups.concat((draft.mains||[]).filter(function(x){return x.exerciseId===exerciseId;}));
+  }
+  if(!groups.length) groups=[].concat(draft.warmups||[],draft.mains||[]);
+  for(var i=0;i<groups.length;i++){
+    var sets=groups[i].sets||[];
+    for(var j=0;j<sets.length;j++){
+      if(sets[j].setId===setId) return sets[j];
+    }
+  }
+  return null;
+}
+function updateSetValue(exerciseId,setId,field,value){
+  if(!setId||!field) return;
+  var set=findCurrentSet(exerciseId,setId);
+  if(!set){
+    captureCurrentWorkoutDraft();
+    set=findCurrentSet(exerciseId,setId);
+  }
+  if(!set) return;
+  set[field]=value;
+  if(field==='weight'||field==='unit'){
+    set.weightKg=Math.round(weightToKg(set.weight,set.unit||'kg')*10)/10;
+  }
+  state.currentWorkoutDrafts[currentDraftKey()].updatedAt=new Date().toISOString();
+  saveState();
+}
 function captureCurrentWorkoutDraft(){
   state.currentWorkoutDrafts=state.currentWorkoutDrafts||{};
   var draft={updatedAt:new Date().toISOString(),planIndex:state.currentIndex,note:getCurrentSessionNote(),warmupInput:(document.getElementById('warmupInput')&&document.getElementById('warmupInput').value)||'',warmups:[],mains:[]};
   document.querySelectorAll('#warmupExercises .warmCard').forEach(function(card){
-    draft.warmups.push({name:(card.querySelector('[data-field="warmName"]')&&card.querySelector('[data-field="warmName"]').value)||'',sets:Array.prototype.slice.call(card.querySelectorAll('.warmSets .setrow')).map(readSetRow)});
+    draft.warmups.push({exerciseId:card.getAttribute('data-card-id')||card.id||'',name:(card.querySelector('[data-field="warmName"]')&&card.querySelector('[data-field="warmName"]').value)||'',sets:Array.prototype.slice.call(card.querySelectorAll('.warmSets .setrow')).map(readSetRow)});
   });
   document.querySelectorAll('#exercises .mainCard').forEach(function(card){
-    draft.mains.push({name:(card.querySelector('[data-field="mainName"]')&&card.querySelector('[data-field="mainName"]').value)||'',originalName:card.getAttribute('data-original-name')||'',trackName:card.getAttribute('data-track-name')||'',custom:card.hasAttribute('data-custom-main'),sets:Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow')).map(readSetRow)});
+    draft.mains.push({exerciseId:card.getAttribute('data-card-id')||card.id||'',name:(card.querySelector('[data-field="mainName"]')&&card.querySelector('[data-field="mainName"]').value)||'',originalName:card.getAttribute('data-original-name')||'',trackName:card.getAttribute('data-track-name')||'',custom:card.hasAttribute('data-custom-main'),sets:Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow')).map(readSetRow)});
   });
   state.currentWorkoutDrafts[currentDraftKey()]=draft;
   return draft;
+}
+function syncCurrentWorkoutFormToState(){
+  syncFloatingNote();
+  var warmInput=document.getElementById('warmupInput');
+  if(warmInput){
+    state.customWarmups=state.customWarmups||{};
+    state.customWarmups['idx_'+state.currentIndex]=warmInput.value;
+  }
+  var draft=captureCurrentWorkoutDraft();
+  state.currentWorkoutLogDraft=buildWorkoutLogSnapshotFromDom('草稿');
+  saveState();
+  return draft;
+}
+function rebuildCurrentWorkoutLogDraft(){
+  syncFloatingNote();
+  var warmInput=document.getElementById('warmupInput');
+  if(warmInput){
+    state.customWarmups=state.customWarmups||{};
+    state.customWarmups['idx_'+state.currentIndex]=warmInput.value;
+  }
+  captureCurrentWorkoutDraft();
+  state.currentWorkoutLogDraft=buildWorkoutLogSnapshotFromDom('草稿');
+  saveState();
+  return state.currentWorkoutLogDraft;
 }
 function restoreCurrentWorkoutDraft(){
   var draft=state.currentWorkoutDrafts&&state.currentWorkoutDrafts[currentDraftKey()];
@@ -1461,6 +1520,12 @@ function handleTrainingDataInput(ev){
   if(ev && ev.target && isTrainingDataField(ev.target)){
     markCurrentTrainingToday({noSave:true});
     captureCurrentWorkoutDraft();
+    var row=ev.target.closest&&ev.target.closest('.setrow');
+    var card=ev.target.closest&&ev.target.closest('.exercise');
+    var field=ev.target.getAttribute('data-field');
+    if(row && field){
+      updateSetValue(card?(card.getAttribute('data-card-id')||card.id||''):'',row.getAttribute('data-set-id')||String(row.id||'').replace(/^row_/,''),field,ev.target.value);
+    }
     saveState();
   }
   updateKpis();
@@ -2139,19 +2204,17 @@ function initWarmupPanel(){
 }
 
 
-function buildWorkoutLogFromCurrent(){
-  markCurrentTrainingToday({noSave:true});
-  captureCurrentWorkoutDraft();
+function buildWorkoutLogSnapshotFromDom(status){
   var w=getWorkout();
-  var warmInput=document.getElementById('warmupInput');
-  if(warmInput){
-    state.customWarmups=state.customWarmups||{};
-    state.customWarmups['idx_'+state.currentIndex]=warmInput.value;
-  }
   var entries=collectEntries();
   var note=syncFloatingNote();
   var logDate=actualDateFor(state.currentIndex) || localDateString();
-  return {date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:'已完成', note:note, entries:entries};
+  return {date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:status||'已完成', note:note, entries:entries};
+}
+function buildWorkoutLogFromCurrent(){
+  markCurrentTrainingToday({noSave:true});
+  syncCurrentWorkoutFormToState();
+  return buildWorkoutLogSnapshotFromDom('已完成');
 }
 function pad2(n){return String(n).padStart(2,'0');}
 function formatEntryLine(e){
@@ -2333,6 +2396,7 @@ function buildCycleBackupObject(){
   var importedPlan=null, importedWarmups=null;
   try{importedPlan=JSON.parse(localStorage.getItem(KEY+'_importedPlan')||'null');}catch(e){}
   try{importedWarmups=JSON.parse(localStorage.getItem(KEY+'_importedWarmups')||'null');}catch(e){}
+  syncCurrentWorkoutFormToState();
   state.logs=getBackupLogsFromState(state);
   state.workoutLogs=state.logs;
   state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs);
@@ -2345,18 +2409,22 @@ function buildCycleBackupObject(){
     warmupActionTemplates:state.warmupActionTemplates||[],
     settings:state.settings||{},
     currentSessionNote:getCurrentSessionNote(),
+    currentWorkoutDrafts:state.currentWorkoutDrafts||{},
+    currentWorkoutLogDraft:state.currentWorkoutLogDraft||null,
     rmRecords:state.rmRecords||[]
   });
   return {version:4, exportedAt:new Date().toISOString(), app:'training-tracker', dateMode:'actualDate-first', state:backupState, importedPlan:importedPlan||PLAN, importedWarmups:importedWarmups||WARMUPS};
 }
+function currentMainWorkoutHasWeight(){
+  return Array.prototype.slice.call(document.querySelectorAll('#exercises .mainCard .mainSets .setrow [data-field="weight"]')).some(function(inp){return String(inp.value||'').trim();});
+}
 function exportCycleBackup(){
-  syncFloatingNote();
-  captureCurrentWorkoutDraft();
-  var warmInput=document.getElementById('warmupInput');
-  if(warmInput){
-    state.customWarmups=state.customWarmups||{};
-    state.customWarmups['idx_'+state.currentIndex]=warmInput.value;
+  syncCurrentWorkoutFormToState();
+  if(document.querySelector('#exercises .mainCard') && !currentMainWorkoutHasWeight()){
+    if(!confirm('当前正式训练没有记录任何重量，是否继续导出？')) return;
   }
+  rebuildCurrentWorkoutLogDraft();
+  state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs||[]);
   state.lastBackupAt=new Date().toISOString();
   saveState();
   downloadCycleBackupFile(false);
