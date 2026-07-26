@@ -1074,3 +1074,72 @@ body{
   .workoutCanvas{padding:18px}
   .workoutUtilityCard{padding:18px}
 }
+
+/* ===== 第一组锚定：用实际首组校准后续训练重量 ===== */
+.anchorCalibration{
+  grid-column:1/-1;
+  width:100%;
+  box-sizing:border-box;
+  margin-top:3px;
+  padding:7px 8px;
+  border:1px solid rgba(121,168,255,.24);
+  border-radius:8px;
+  background:rgba(121,168,255,.08);
+}
+.anchorCalibrationHead,
+.anchorCalibrationBody{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  min-width:0;
+}
+.anchorCalibrationHead{justify-content:space-between;margin-bottom:5px}
+.anchorCalibrationHead b{font-size:12px;color:var(--text);font-weight:800}
+.anchorCalibrationHead span{min-width:0;font-size:10px;line-height:1.25;color:var(--muted);text-align:right}
+.anchorCalibrationBody [data-anchor-result]{
+  flex:1 1 180px;
+  min-width:0;
+  color:var(--text);
+  font-size:12px;
+  font-weight:800;
+  font-variant-numeric:tabular-nums;
+}
+.anchorCalibrationBody label{
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  gap:3px;
+  color:var(--muted);
+  font-size:10px;
+  white-space:nowrap;
+}
+.anchorCalibrationBody input[data-anchor-step]{
+  width:45px!important;
+  height:28px!important;
+  min-height:28px!important;
+  padding:3px 5px!important;
+  font-size:13px!important;
+  text-align:center;
+}
+.anchorCalibrationBody button[data-anchor-apply]{
+  flex:0 0 auto;
+  min-height:30px!important;
+  padding:5px 8px!important;
+  font-size:11px!important;
+  white-space:nowrap!important;
+}
+.anchorCalibration.anchorHeavy{border-color:rgba(255,149,0,.34);background:rgba(255,149,0,.10)}
+.anchorCalibration.anchorHeavy [data-anchor-status]{color:#c66a00}
+.anchorCalibration.anchorGood{border-color:rgba(52,199,89,.30);background:rgba(52,199,89,.09)}
+.anchorCalibration.anchorGood [data-anchor-status]{color:var(--ok)}
+.anchorCalibration.anchorLight{border-color:rgba(0,122,255,.34);background:rgba(0,122,255,.09)}
+.anchorCalibration.anchorLight [data-anchor-status]{color:var(--blue)}
+@media(max-width:640px){
+  .anchorCalibration{padding:6px 7px}
+  .anchorCalibrationHead{align-items:flex-start}
+  .anchorCalibrationHead span{max-width:72%;font-size:9px}
+  .anchorCalibrationBody{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:5px}
+  .anchorCalibrationBody [data-anchor-result]{grid-column:1/-1;font-size:11px}
+  .anchorCalibrationBody label{justify-self:start}
+  .anchorCalibrationBody button[data-anchor-apply]{justify-self:end}
+}

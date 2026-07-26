@@ -347,6 +347,11 @@ function normalizeSetNumbersInDom(scope){
       label.textContent=isMain?('第'+no+'/'+total+'组'):('第'+no+'组');
     }
   });
+  var mainCard=scope&&scope.closest&&scope.closest('.mainCard');
+  if(mainCard){
+    ensureAnchorCalibrationForCard(mainCard);
+    updateAnchorAssessment(mainCard);
+  }
 }
 function readSetRow(row){
   row=row||{};
@@ -453,7 +458,10 @@ function rebuildCurrentWorkoutLogDraft(){
 }
 function restoreCurrentWorkoutDraft(){
   var draft=state.currentWorkoutDrafts&&state.currentWorkoutDrafts[currentDraftKey()];
-  if(!draft) return;
+  if(!draft){
+    refreshAllAnchorAssessments();
+    return;
+  }
   if(draft.note!==undefined) setCurrentSessionNote(draft.note,{noSave:true});
   (draft.warmups||[]).forEach(function(saved,idx){
     var card=document.querySelectorAll('#warmupExercises .warmCard')[idx]; if(!card) return;
@@ -482,6 +490,7 @@ function restoreCurrentWorkoutDraft(){
     (saved.sets||[]).forEach(function(st,i){ if(rows[i]) writeSetRow(rows[i],st); });
     if(wrap) normalizeSetNumbersInDom(wrap);
   });
+  refreshAllAnchorAssessments();
 }
 function clearCurrentWorkoutDraft(index){
   state.currentWorkoutDrafts=state.currentWorkoutDrafts||{};
@@ -980,6 +989,115 @@ function lastReferenceHTML(name){
   return '<div class="lastRef"><b>上次同名：</b>暂无记录</div>';
 }
 
+function anchorCalibrationHTML(){
+  return `<div class="anchorCalibration" data-anchor-calibration="1">
+    <div class="anchorCalibrationHead">
+      <b>第一组锚定</b>
+      <span data-anchor-status>填完第一组重量、次数和实际RIR后计算</span>
+    </div>
+    <div class="anchorCalibrationBody">
+      <span data-anchor-result>今日e1RM --｜后续建议 --</span>
+      <label>步进 <input type="number" min="0.5" step="0.5" value="2" data-anchor-step oninput="updateAnchorAssessment(this.closest('.mainCard'))"> <span data-anchor-step-unit>kg</span></label>
+      <button type="button" class="blue" data-anchor-apply disabled onclick="applyAnchorWeightToFollowingSets(this)">填入后续组</button>
+    </div>
+  </div>`;
+}
+function ensureAnchorCalibrationForCard(card){
+  if(!card) return;
+  var rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow'));
+  if(!rows.length) return;
+  var anchor=card.querySelector('[data-anchor-calibration]');
+  if(anchor && anchor.closest('.setrow')!==rows[0]) rows[0].appendChild(anchor);
+  if(!anchor) rows[0].insertAdjacentHTML('beforeend',anchorCalibrationHTML());
+}
+function anchorTargetReps(card,rows,actualReps){
+  var second=rows[1]&&rows[1].querySelector('[data-field="reps"]');
+  var fromSecond=parseFloat(second&&second.value);
+  if(fromSecond>0) return fromSecond;
+  var plan=String(card.getAttribute('data-plan-reps')||'').replace(/[–~至]/g,'-');
+  var nums=plan.match(/\d+(?:\.\d+)?/g)||[];
+  if(nums.length) return parseFloat(nums[nums.length-1])||actualReps;
+  return actualReps;
+}
+function updateAnchorAssessment(card){
+  if(!card) return;
+  ensureAnchorCalibrationForCard(card);
+  var panel=card.querySelector('[data-anchor-calibration]');
+  var rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow'));
+  var first=rows[0];
+  if(!panel||!first) return;
+  var result=panel.querySelector('[data-anchor-result]');
+  var status=panel.querySelector('[data-anchor-status]');
+  var apply=panel.querySelector('[data-anchor-apply]');
+  var weightInput=first.querySelector('[data-field="weight"]');
+  var repsInput=first.querySelector('[data-field="reps"]');
+  var rirInput=first.querySelector('[data-field="rir"]');
+  var unitInput=first.querySelector('[data-field="unit"]');
+  var weight=parseFloat(weightInput&&weightInput.value);
+  var reps=parseFloat(repsInput&&repsInput.value);
+  var rirText=String(rirInput&&rirInput.value||'').trim();
+  var unit=(unitInput&&unitInput.value)||'kg';
+  var stepUnit=panel.querySelector('[data-anchor-step-unit]');
+  if(stepUnit) stepUnit.textContent=unit;
+  if(!(weight>0)||!(reps>0)||!rirText){
+    panel.classList.remove('anchorHeavy','anchorGood','anchorLight');
+    status.textContent='填完第一组重量、次数和实际RIR后计算';
+    result.textContent='今日e1RM --｜后续建议 --';
+    apply.disabled=true;
+    apply.removeAttribute('data-anchor-suggested');
+    apply.textContent='填入后续组';
+    return;
+  }
+  var actualRir=parseRirValue(rirText);
+  var planRirText=String(card.getAttribute('data-plan-rir')||'').trim();
+  var targetRir=planRirText?parseRirValue(planRirText):actualRir;
+  var targetReps=anchorTargetReps(card,rows,reps);
+  var oneRm=weight*(1+(reps+actualRir)/30);
+  var raw=oneRm/(1+(targetReps+targetRir)/30);
+  var stepInput=panel.querySelector('[data-anchor-step]');
+  var step=parseFloat(stepInput&&stepInput.value)||2;
+  var suggested=roundToStep(raw,step);
+  var stateClass='anchorGood';
+  var stateText='强度合适';
+  if(actualRir<targetRir-.25){stateClass='anchorHeavy';stateText='第一组比计划更吃力';}
+  else if(actualRir>targetRir+.25){stateClass='anchorLight';stateText='第一组比计划更轻松';}
+  panel.classList.remove('anchorHeavy','anchorGood','anchorLight');
+  panel.classList.add(stateClass);
+  status.textContent=stateText+'｜目标 '+fmtKg(targetReps)+'次 RIR '+(planRirText||fmtKg(targetRir));
+  result.textContent='今日e1RM '+fmtKg(oneRm)+unit+'｜后续建议 '+fmtKg(suggested)+unit;
+  apply.disabled=rows.length<2;
+  apply.setAttribute('data-anchor-suggested',String(suggested));
+  apply.setAttribute('data-anchor-unit',unit);
+  apply.textContent=rows.length<2?'只有一组':'后续组用 '+fmtKg(suggested)+unit;
+}
+function refreshAllAnchorAssessments(){
+  document.querySelectorAll('#exercises .mainCard').forEach(function(card){
+    updateAnchorAssessment(card);
+  });
+}
+function applyAnchorWeightToFollowingSets(btn){
+  var card=btn&&btn.closest('.mainCard');
+  if(!card) return;
+  var suggested=btn.getAttribute('data-anchor-suggested');
+  var unit=btn.getAttribute('data-anchor-unit')||'kg';
+  if(!suggested) return;
+  var rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow')).slice(1);
+  rows.forEach(function(row){
+    var weight=row.querySelector('[data-field="weight"]');
+    var unitSelect=row.querySelector('[data-field="unit"]');
+    if(unitSelect) unitSelect.value=unit;
+    if(weight){
+      weight.value=suggested;
+      weight.dispatchEvent(new Event('input',{bubbles:true}));
+    }
+  });
+  captureCurrentWorkoutDraft();
+  saveState();
+  updateKpis();
+  updateAnchorAssessment(card);
+  showToast('已把 '+fmtKg(parseFloat(suggested))+unit+' 填入后续 '+rows.length+' 组');
+}
+
 function mainSetHTML(ei,s,reps,rir,rest,duration,custom,totalSets,setId){
   var id=setId||createSetId((custom?'c':'e')+ei);
   var rr=rest||{min:90,max:180,def:120,label:'自定'};
@@ -998,6 +1116,7 @@ function mainSetHTML(ei,s,reps,rir,rest,duration,custom,totalSets,setId){
     </div>
     ${durationControlHTML(id,duration||'')}
     <div class="row" style="gap:6px">${restControlHTML(id,rr)}<button class="delBtn" onclick="removeMainSet(this)">删除这一组</button></div>
+    ${s===1?anchorCalibrationHTML():''}
   </div>`;
 }
 function mainCardHTML(ex,ei,w,custom){
@@ -1527,6 +1646,7 @@ function handleTrainingDataInput(ev){
       updateSetValue(card?(card.getAttribute('data-card-id')||card.id||''):'',row.getAttribute('data-set-id')||String(row.id||'').replace(/^row_/,''),field,ev.target.value);
     }
     saveState();
+    if(card&&card.classList&&card.classList.contains('mainCard')) updateAnchorAssessment(card);
   }
   updateKpis();
 }
@@ -1536,6 +1656,7 @@ function bindTrainingDataInputs(scope){
     i.addEventListener('input', handleTrainingDataInput);
     i.addEventListener('change', handleTrainingDataInput);
   });
+  refreshAllAnchorAssessments();
 }
 
 function updateKpis(){
