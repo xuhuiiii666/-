@@ -7,12 +7,18 @@
 <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
-<header>
-  <h1>逐日训练器｜按你这份 12 周计划生成</h1>
-  <div class="sub">本地保存：训练日志、上次重量、e1RM、计划顺延都会存在浏览器 localStorage。建议用同一个浏览器打开。</div>
+<header class="appHeader">
+  <div class="brandLockup">
+    <span class="brandMark">逐日</span>
+    <div>
+      <h1>逐日训练器</h1>
+      <div class="sub">12 周训练计划</div>
+    </div>
+  </div>
+  <div class="headerStatus">本地存档</div>
 </header>
 <div class="wrap">
-  <select id="mobileTabSelect" class="mobileTabSelect" onchange="showTab(this.value)">
+  <select id="mobileTabSelect" class="mobileTabSelect" aria-label="页面导航" onchange="showTab(this.value)">
     <option value="today">今日训练</option>
     <option value="calendar">日历/顺延</option>
     <option value="history">训练记录</option>
@@ -31,26 +37,31 @@
   </div>
 
   <section id="today" class="grid">
-    <div class="card">
-      <div class="row between">
-        <div>
+    <div class="card workoutCanvas">
+      <div class="todayHero">
+        <div class="todaySummary">
           <div class="small" id="dateLine"></div>
           <div class="title" id="workoutTitle"></div>
           <div class="row" id="badges"></div>
-          <div class="row" style="margin-top:8px">
+        </div>
+        <div class="row quickWorkoutNav">
+          <button type="button" onclick="prevWorkout()">上一练</button>
+          <button type="button" onclick="nextWorkout()">下一练</button>
+        </div>
+        <details class="planAdjust">
+          <summary>调整日期与训练顺序</summary>
+          <div class="row planDateTools">
             <label class="small">本次训练标注日期 <input type="date" id="actualDate" onchange="anchorCurrentDate()"></label>
             <button class="blue" onclick="anchorCurrentDate()">按此日期顺延后续</button>
             <button class="bad" onclick="outdoorNoTrainingToday()">今日外出无训练</button>
           </div>
-        </div>
-        <div class="row todayMoveTools">
-          <button type="button" onclick="prevWorkout()">上一练</button>
-          <button type="button" onclick="nextWorkout()">下一练</button>
+          <div class="row todayMoveTools">
           <button type="button" class="blue" onclick="moveCurrentTraining(-1)">← 当前练前移</button>
           <button type="button" class="primary" onclick="moveCurrentTraining(1)">当前练后推 →</button>
-        </div>
+          </div>
+        </details>
+        <div id="restNotice" class="small"></div>
       </div>
-      <div id="restNotice" class="small"></div>
       <div id="moduleMap" class="moduleMap"></div>
       <div class="collapsePanel" id="warmupPanel">
         <div class="collapseHead" onclick="toggleWarmupPanel()">
@@ -105,7 +116,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card workoutUtilityCard">
       <h3>组间歇计时器</h3>
       <div class="timer" id="timer">03:00</div>
       <div class="row timerControls">
@@ -231,6 +242,14 @@
   </section>
 
 </div>
+<nav class="mobileDock" aria-label="主导航">
+  <button type="button" class="tab mobileDockItem isOn" data-tab="today" onclick="showTab('today')"><span>今日</span></button>
+  <button type="button" class="tab mobileDockItem" data-tab="calendar" onclick="showTab('calendar')"><span>队列</span></button>
+  <button type="button" class="tab mobileDockItem" data-tab="history" onclick="showTab('history')"><span>记录</span></button>
+  <button type="button" class="tab mobileDockItem" data-tab="settings" onclick="showTab('settings')"><span>设置</span></button>
+  <button type="button" class="tab mobileDockItem" data-tab="rmcalc" onclick="showTab('rmcalc')"><span>RM</span></button>
+  <button type="button" class="tab mobileDockItem" data-tab="importer" onclick="showTab('importer')"><span>导入</span></button>
+</nav>
 
 <div id="saveTemplateModal" class="modalMask">
   <div class="modalPanel">
@@ -345,10 +364,10 @@
 </div>
 <div id="timerToast" class="timerToast"></div>
 <div id="timerConfirmMask" class="timerConfirmMask"><div class="timerConfirmBox"><h3 id="timerConfirmTitle">倒计时结束</h3><p id="timerConfirmBody">可以开始下一步。</p><button type="button" onclick="closeTimerConfirm()">确认</button></div></div>
-<script src="storage.js?v=20260524-weightchain"></script>
-<script src="templates.js?v=20260524-weightchain"></script>
-<script src="parser.js?v=20260524-weightchain"></script>
-<script src="importer.js?v=20260524-weightchain"></script>
-<script src="app.js?v=20260524-weightchain"></script>
+<script src="storage.js?v=20260726-ui"></script>
+<script src="templates.js?v=20260726-ui"></script>
+<script src="parser.js?v=20260726-ui"></script>
+<script src="importer.js?v=20260726-ui"></script>
+<script src="app.js?v=20260726-ui"></script>
 </body>
 </html>

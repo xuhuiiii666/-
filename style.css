@@ -930,3 +930,147 @@ textarea{width:100%;min-height:76px}.hidden{display:none}
 .templateControls input,.templateControls select{height:36px;border-radius:10px}
 .templateCat{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:#13233f;border:1px solid #24436f;color:#b9d5ff;font-size:12px;font-weight:800;margin-right:6px}
 @media(max-width:640px){.templateControls{grid-template-columns:1fr}.templateControls input,.templateControls select{height:38px}.moduleTools{gap:6px}.moduleTools button{padding:6px 8px;font-size:12px}}
+
+/* ===== 2026-07 手机优先界面更新 ===== */
+:root{
+  --bg:#090d12;
+  --card:#111820;
+  --card2:#161f29;
+  --text:#f4f7fa;
+  --muted:#9aa8b7;
+  --line:#293542;
+  --accent:#f3cb58;
+  --ok:#4fd18b;
+  --bad:#ff7d84;
+  --blue:#75a7ff;
+}
+body{
+  background:#090d12;
+  letter-spacing:0;
+}
+.appHeader{
+  min-height:64px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:10px 18px;
+  background:rgba(9,13,18,.94);
+  border-bottom:1px solid rgba(148,163,184,.14);
+}
+.brandLockup{display:flex;align-items:center;gap:10px;min-width:0}
+.brandMark{
+  width:38px;height:38px;display:grid;place-items:center;
+  border-radius:8px;background:var(--accent);color:#181306;
+  font-size:13px;font-weight:950;
+}
+.appHeader h1{font-size:17px;line-height:1.1;margin:0}
+.appHeader .sub{margin-top:3px;font-size:11px}
+.headerStatus{
+  color:#b9f6d2;background:#102a1e;border:1px solid #27563e;
+  border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;
+}
+.wrap{padding-top:12px}
+.tabs{margin-bottom:6px}
+.todayHero{
+  padding:4px 2px 12px;
+  border-bottom:1px solid rgba(148,163,184,.14);
+  margin-bottom:12px;
+}
+.todaySummary{min-width:0}
+.todayHero .title{font-size:clamp(22px,3vw,30px);line-height:1.18;margin:7px 0 9px}
+.quickWorkoutNav{margin-top:12px}
+.quickWorkoutNav button{min-width:96px}
+.planAdjust{
+  margin-top:10px;border:1px solid var(--line);border-radius:8px;
+  background:#0d131a;overflow:hidden;
+}
+.planAdjust summary{
+  cursor:pointer;list-style:none;padding:10px 12px;
+  color:#c5d0dc;font-size:12px;font-weight:800;
+}
+.planAdjust summary::-webkit-details-marker{display:none}
+.planAdjust summary::after{content:"+";float:right;color:var(--muted);font-size:17px;line-height:1}
+.planAdjust[open] summary::after{content:"−"}
+.planAdjust[open] summary{border-bottom:1px solid var(--line)}
+.planDateTools,.planAdjust .todayMoveTools{padding:10px 12px 0}
+.planAdjust .todayMoveTools{padding-bottom:12px}
+.workoutCanvas{border-radius:8px}
+.workoutUtilityCard{border-radius:8px;align-self:start;position:sticky;top:82px}
+.mobileDock{display:none}
+.finishUnified{
+  padding:12px 0;
+  border-top:1px solid rgba(148,163,184,.14);
+  border-bottom:1px solid rgba(148,163,184,.14);
+}
+.finishUnified .ok{flex:2 1 320px;min-height:48px;font-weight:900}
+.finishUnified .blue,.finishUnified .bad{flex:1 1 150px}
+.exportPanel{border-radius:8px!important}
+.collapsePanel,.exercise,.calcBlock,.simpleSelectedPanel{border-radius:8px!important}
+
+@media(max-width:720px){
+  .appHeader{position:sticky;top:0;min-height:54px;padding:8px 12px;z-index:90}
+  .brandMark{width:34px;height:34px;border-radius:7px;font-size:12px}
+  .appHeader h1{font-size:16px}
+  .appHeader .sub{font-size:10px}
+  .headerStatus{padding:4px 7px;font-size:10px}
+  .wrap{padding:8px 8px calc(96px + env(safe-area-inset-bottom))}
+  #topTabs,.mobileTabSelect,.mobileTabGo{display:none!important}
+  .mobileDock{
+    position:fixed;left:8px;right:8px;bottom:8px;z-index:20000;
+    display:grid;grid-template-columns:repeat(6,minmax(0,1fr));
+    height:58px;padding:5px;
+    padding-bottom:max(5px,env(safe-area-inset-bottom));
+    background:rgba(17,24,32,.96);
+    border:1px solid #344352;border-radius:8px;
+    box-shadow:0 12px 34px rgba(0,0,0,.48);
+    backdrop-filter:blur(16px);
+  }
+  .mobileDock .mobileDockItem{
+    min-width:0!important;height:46px!important;padding:0 2px!important;
+    border:0!important;border-radius:6px!important;background:transparent!important;
+    color:#8f9dac!important;font-size:11px!important;font-weight:800;
+  }
+  .mobileDock .mobileDockItem.isOn{
+    background:#28333d!important;color:#fff!important;
+    box-shadow:inset 0 -3px 0 var(--accent);
+  }
+  .workoutCanvas{padding:10px!important}
+  .todayHero{padding:2px 2px 10px;margin-bottom:10px}
+  .todayHero .title{font-size:24px!important;margin:6px 0 8px}
+  .quickWorkoutNav{display:grid!important;grid-template-columns:1fr 1fr;gap:7px}
+  .quickWorkoutNav button{width:100%;min-width:0;min-height:40px}
+  .planAdjust{margin-top:8px}
+  .planDateTools,.planAdjust .todayMoveTools{
+    display:grid!important;grid-template-columns:1fr!important;
+  }
+  .planDateTools label{display:grid;grid-template-columns:1fr;gap:5px}
+  .planDateTools input,.planDateTools button,.planAdjust .todayMoveTools button{width:100%}
+  .moduleMap{margin-top:10px!important}
+  .collapseHead h3,.workoutCanvas>h3{font-size:18px}
+  .bottomAdd{display:grid!important;grid-template-columns:1fr!important}
+  .bottomAdd button{width:100%;min-height:40px}
+  .finishUnified{display:grid!important;grid-template-columns:1fr!important}
+  .finishUnified button{width:100%;min-height:44px}
+  .finishUnified .ok{min-height:54px;font-size:14px!important}
+  .workoutUtilityCard{position:static}
+  .floatingNote{bottom:78px!important}
+  .timerToast{bottom:82px!important}
+  .card{box-shadow:none!important;border-color:#293542!important}
+  .exercise{background:#141c25!important;border-color:#2a3744!important}
+  button{min-height:36px}
+  input,select,textarea{border-radius:8px!important}
+  #calendar #cal{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:8px!important;
+  }
+  #calendar .trainItem.labelCard{min-height:132px!important}
+  #calendar .labelBand{font-size:11px!important}
+  #calendar .labelDate{font-size:11px!important}
+  #calendar .labelTitle{font-size:12px!important;min-height:29px!important}
+  #calendar .labelActions button{font-size:11px!important;min-height:29px!important}
+}
+
+@media(min-width:721px){
+  .workoutCanvas{padding:18px}
+  .workoutUtilityCard{padding:18px}
+}

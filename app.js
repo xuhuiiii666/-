@@ -2535,7 +2535,7 @@ function promoteNextTrainingToToday(){
       var el=document.getElementById(pages[i]);
       if(el) el.classList.toggle('hidden', pages[i]!==id);
     }
-    var btns=document.querySelectorAll('#topTabs .tab,.tabs .tab');
+    var btns=document.querySelectorAll('#topTabs .tab,.tabs .tab,.mobileDock .tab');
     for(var j=0;j<btns.length;j++){
       var on=(btns[j].getAttribute('data-tab')===id);
       btns[j].classList.toggle('isOn',on);
@@ -2546,10 +2546,11 @@ function promoteNextTrainingToToday(){
       if(id==='calendar')renderCalendar();
       if(id==='history')renderHistory();
       if(id==='settings')renderSettings();
+      try{ window.scrollTo({top:0,behavior:'auto'}); }catch(scrollError){ window.scrollTo(0,0); }
     }catch(e){ console.error(e); }
   };
   function bindMobileTabs(){
-    var btns=document.querySelectorAll('#topTabs .tab,.tabs .tab');
+    var btns=document.querySelectorAll('#topTabs .tab,.tabs .tab,.mobileDock .tab');
     for(var i=0;i<btns.length;i++){
       (function(btn){
         if(btn.__mobileBound) return;
