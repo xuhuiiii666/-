@@ -996,9 +996,7 @@ function anchorCalibrationHTML(){
       <span data-anchor-status>填完第一组重量、次数和实际RIR后计算</span>
     </div>
     <div class="anchorCalibrationBody">
-      <span data-anchor-result>今日e1RM --｜后续建议 --</span>
-      <label>步进 <input type="number" min="0.5" step="0.5" value="2" data-anchor-step oninput="updateAnchorAssessment(this.closest('.mainCard'))"> <span data-anchor-step-unit>kg</span></label>
-      <button type="button" class="blue" data-anchor-apply disabled onclick="applyAnchorWeightToFollowingSets(this)">填入后续组</button>
+      <span data-anchor-result>今日e1RM --｜RM参考 --</span>
     </div>
   </div>`;
 }
@@ -1019,6 +1017,29 @@ function anchorTargetReps(card,rows,actualReps){
   if(nums.length) return parseFloat(nums[nums.length-1])||actualReps;
   return actualReps;
 }
+function anchorTargetRirRange(value,fallback){
+  var text=String(value||'').replace(/[～~至–]/g,'-').trim();
+  var nums=text.match(/\d+(?:\.\d+)?/g)||[];
+  if(nums.length>=2){
+    var a=parseFloat(nums[0]), b=parseFloat(nums[1]);
+    return {min:Math.min(a,b),max:Math.max(a,b),label:text};
+  }
+  if(nums.length===1){
+    var one=parseFloat(nums[0]);
+    return {min:one,max:one,label:text};
+  }
+  return {min:fallback,max:fallback,label:fmtKg(fallback)};
+}
+function fmtAnchorWeight(value){
+  if(!isFinite(value)) return '--';
+  return String(Math.round(value*10)/10);
+}
+function anchorReferenceText(oneRm,targetReps,rirRange,unit){
+  var low=oneRm/(1+(targetReps+rirRange.max)/30);
+  var high=oneRm/(1+(targetReps+rirRange.min)/30);
+  if(Math.abs(high-low)<0.1) return '约'+fmtAnchorWeight((low+high)/2)+unit;
+  return '约'+fmtAnchorWeight(low)+'-'+fmtAnchorWeight(high)+unit;
+}
 function updateAnchorAssessment(card){
   if(!card) return;
   ensureAnchorCalibrationForCard(card);
@@ -1028,7 +1049,6 @@ function updateAnchorAssessment(card){
   if(!panel||!first) return;
   var result=panel.querySelector('[data-anchor-result]');
   var status=panel.querySelector('[data-anchor-status]');
-  var apply=panel.querySelector('[data-anchor-apply]');
   var weightInput=first.querySelector('[data-field="weight"]');
   var repsInput=first.querySelector('[data-field="reps"]');
   var rirInput=first.querySelector('[data-field="rir"]');
@@ -1037,65 +1057,32 @@ function updateAnchorAssessment(card){
   var reps=parseFloat(repsInput&&repsInput.value);
   var rirText=String(rirInput&&rirInput.value||'').trim();
   var unit=(unitInput&&unitInput.value)||'kg';
-  var stepUnit=panel.querySelector('[data-anchor-step-unit]');
-  if(stepUnit) stepUnit.textContent=unit;
   if(!(weight>0)||!(reps>0)||!rirText){
     panel.classList.remove('anchorHeavy','anchorGood','anchorLight');
     status.textContent='填完第一组重量、次数和实际RIR后计算';
-    result.textContent='今日e1RM --｜后续建议 --';
-    apply.disabled=true;
-    apply.removeAttribute('data-anchor-suggested');
-    apply.textContent='填入后续组';
+    result.textContent='今日e1RM --｜RM参考 --';
     return;
   }
   var actualRir=parseRirValue(rirText);
   var planRirText=String(card.getAttribute('data-plan-rir')||'').trim();
   var targetRir=planRirText?parseRirValue(planRirText):actualRir;
+  var rirRange=anchorTargetRirRange(planRirText,actualRir);
   var targetReps=anchorTargetReps(card,rows,reps);
   var oneRm=weight*(1+(reps+actualRir)/30);
-  var raw=oneRm/(1+(targetReps+targetRir)/30);
-  var stepInput=panel.querySelector('[data-anchor-step]');
-  var step=parseFloat(stepInput&&stepInput.value)||2;
-  var suggested=roundToStep(raw,step);
+  var reference=anchorReferenceText(oneRm,targetReps,rirRange,unit);
   var stateClass='anchorGood';
   var stateText='强度合适';
   if(actualRir<targetRir-.25){stateClass='anchorHeavy';stateText='第一组比计划更吃力';}
   else if(actualRir>targetRir+.25){stateClass='anchorLight';stateText='第一组比计划更轻松';}
   panel.classList.remove('anchorHeavy','anchorGood','anchorLight');
   panel.classList.add(stateClass);
-  status.textContent=stateText+'｜目标 '+fmtKg(targetReps)+'次 RIR '+(planRirText||fmtKg(targetRir));
-  result.textContent='今日e1RM '+fmtKg(oneRm)+unit+'｜后续建议 '+fmtKg(suggested)+unit;
-  apply.disabled=rows.length<2;
-  apply.setAttribute('data-anchor-suggested',String(suggested));
-  apply.setAttribute('data-anchor-unit',unit);
-  apply.textContent=rows.length<2?'只有一组':'后续组用 '+fmtKg(suggested)+unit;
+  status.textContent=stateText+'｜目标 '+fmtKg(targetReps)+'次 RIR '+rirRange.label;
+  result.textContent='今日e1RM '+fmtKg(oneRm)+unit+'｜RM参考 '+reference+'｜后续组请自行填写';
 }
 function refreshAllAnchorAssessments(){
   document.querySelectorAll('#exercises .mainCard').forEach(function(card){
     updateAnchorAssessment(card);
   });
-}
-function applyAnchorWeightToFollowingSets(btn){
-  var card=btn&&btn.closest('.mainCard');
-  if(!card) return;
-  var suggested=btn.getAttribute('data-anchor-suggested');
-  var unit=btn.getAttribute('data-anchor-unit')||'kg';
-  if(!suggested) return;
-  var rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow')).slice(1);
-  rows.forEach(function(row){
-    var weight=row.querySelector('[data-field="weight"]');
-    var unitSelect=row.querySelector('[data-field="unit"]');
-    if(unitSelect) unitSelect.value=unit;
-    if(weight){
-      weight.value=suggested;
-      weight.dispatchEvent(new Event('input',{bubbles:true}));
-    }
-  });
-  captureCurrentWorkoutDraft();
-  saveState();
-  updateKpis();
-  updateAnchorAssessment(card);
-  showToast('已把 '+fmtKg(parseFloat(suggested))+unit+' 填入后续 '+rows.length+' 组');
 }
 
 function mainSetHTML(ei,s,reps,rir,rest,duration,custom,totalSets,setId){
