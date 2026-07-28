@@ -135,18 +135,29 @@ function collectSection(txt, titles){
   }
   return blocks;
 }
+function isSectionInstructionLine(line){
+  var x=stripBullets(line);
+  return /^(?:以下动作|连续完成|每轮|全程|不做|当天|不追加|保持|本周规则)(?:[:：\s，,]|$)/.test(x) ||
+    /^(?:今日目标|观察|当日观察|重点|节奏|替代|减重|技术(?:提示)?|动作标准|提示)[:：]/.test(x);
+}
+function isStructuredExerciseHead(line){
+  var raw=String(line||'').trim();
+  var clean=stripBullets(raw);
+  if(!clean || isSectionInstructionLine(clean)) return false;
+  if(/^\d+[\.、\)、)]\s*/.test(raw)) return true;
+  if(clean.indexOf('｜')>=0 && /组|次|秒|分钟|呼吸|Zone\s*2|x|×/i.test(clean)) return true;
+  return /(?:\d+\s*组(?:\s*[x×＊*]\s*[\d\-~至]+)?|\d+\s*[x×＊*]\s*[\d\-~至]+|\d+\s*(?:秒|s|sec|分钟|min|次呼吸|次|下|步|米)(?:\/侧)?|Zone\s*2)/i.test(clean);
+}
 function sectionItems(block){
   var lines=String(block||'').split('\n').map(function(x){return String(x||'').trim();}).filter(Boolean);
   var items=[], cur=null;
   for(var i=0;i<lines.length;i++){
     var line=lines[i];
-    if(/^\d+[\.、\)、)]\s*/.test(line)){
+    if(isStructuredExerciseHead(line)){
       if(cur) items.push(cur);
       cur={head:line, details:[]};
     }else if(cur){
       cur.details.push(line);
-    }else if(line.indexOf('｜')>=0 && /组|x|×/.test(line)){
-      cur={head:line, details:[]};
     }
   }
   if(cur) items.push(cur);
@@ -192,11 +203,13 @@ function parseMobileDayContent(content){
   var txt=String(content||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n');
   // 徐晖版手机清晰版：优先读取【功能模块】为热身；【主项/辅助/核心/康复辅助/有氧】为正式训练。
   var warmBlocks=collectSection(txt,['功能模块','功能/热身','热身']);
-  var mainBlocks=collectSection(txt,['主项','主辅助','正式训练','主训练','辅助','康复/辅助','康复辅助','核心','有氧','执行','可选恢复']);
+  var mainBlocks=collectSection(txt,['主项','主辅助','正式训练','主训练','功能循环','功能训练','训练循环','辅助','康复/辅助','康复辅助','核心','有氧','执行','可选恢复']);
   var recoveryBlocks=collectSection(txt,['恢复']);
   var restBlocks=collectSection(txt,['休息']);
-  if(!warmBlocks.length && recoveryBlocks.length && !mainBlocks.length){ warmBlocks=recoveryBlocks; }
-  if(!mainBlocks.length && restBlocks.length){ mainBlocks=restBlocks; }
+  var hasStructuredSections=!!(warmBlocks.length || mainBlocks.length || recoveryBlocks.length || restBlocks.length);
+  if(!mainBlocks.length){
+    warmBlocks=warmBlocks.concat(recoveryBlocks,restBlocks);
+  }
   var warmLines=linesFromBlocks(warmBlocks,'warm');
   var mainLines=linesFromBlocks(mainBlocks,'main');
   // 旧格式兜底。
@@ -208,7 +221,7 @@ function parseMobileDayContent(content){
     var main = extractSectionBlock(txt,'主训练') || extractSectionBlock(txt,'正式训练') || extractSectionBlock(txt,'执行') || '';
     mainLines=cleanSectionLines(main,'main');
   }
-  return {warmup:warmLines.join('\n'), main:mainLines.join('\n'), rawMain:mainLines.join('\n'), rawExecute:''};
+  return {warmup:warmLines.join('\n'), main:mainLines.join('\n'), rawMain:mainLines.join('\n'), rawExecute:'', hasStructuredSections:hasStructuredSections};
 }
 function importFormatA(rows, headerRow){
   var h=rows[headerRow];
@@ -294,7 +307,7 @@ function importFormatB(rows, headerRow){
       '训练主题': title,
       '热身模板': parsed.warmup ? warmName : '—',
       '导入热身内容': parsed.warmup,
-      '训练内容（组×次数/余力）': parsed.main || normalizeSetRepText(content),
+      '训练内容（组×次数/余力）': parsed.main || (parsed.hasStructuredSections ? '' : normalizeSetRepText(content)),
       '组间休息/规则': '按动作行内休息优先；主项约150–210秒；大辅助90–120秒；小辅助45–90秒',
       '完成日期': cell(row,ixDone)||''
     });
@@ -384,7 +397,28 @@ function parseDailyGridSheet(sheet, planType){
     day['导入序号'] = idx + 1;
     return day;
   });
+  parsed.validation = validateImportedPlan(parsed.plan);
   return parsed;
+}
+
+function importedExerciseNames(day){
+  return String((day&&day['训练内容（组×次数/余力）'])||'').split('\n').map(function(line){
+    var parsed=(typeof parseExerciseLine==='function') ? parseExerciseLine(line) : null;
+    return parsed&&parsed.valid ? normalizeExerciseName(parsed.name) : '';
+  }).filter(Boolean);
+}
+function validateImportedPlan(plan){
+  var duplicateDays=[];
+  (plan||[]).forEach(function(day,idx){
+    var seen={}, duplicates=[];
+    importedExerciseNames(day).forEach(function(name){
+      var key=String(name||'').toLowerCase().replace(/\s+/g,'');
+      if(seen[key] && duplicates.indexOf(name)<0) duplicates.push(name);
+      seen[key]=true;
+    });
+    if(duplicates.length) duplicateDays.push({index:idx+1,title:day['训练主题']||'',names:duplicates});
+  });
+  return {dayCount:(plan||[]).length,duplicateDays:duplicateDays};
 }
 
 function parseWorkbookToImport(workbook, file){
@@ -438,11 +472,29 @@ function previewImportPlan(){
     var parsed=detectAndParseImport(box.value);
     lastImportPreview=parsed;
     var first=parsed.plan[0]||{};
-    out.textContent='识别格式：'+parsed.type+'\n训练日数量：'+parsed.plan.length+'\n热身模板数量：'+(parsed.warmups?parsed.warmups.length:'沿用表内热身模板')+'\n\n第一条预览：\n'+JSON.stringify(first,null,2).slice(0,1200);
+    var duplicateCount=(parsed.validation&&parsed.validation.duplicateDays&&parsed.validation.duplicateDays.length)||0;
+    out.textContent='识别格式：'+parsed.type+'\n训练日数量：'+parsed.plan.length+'\n热身模板数量：'+(parsed.warmups?parsed.warmups.length:'沿用表内热身模板')+'\n同日重复动作检查：'+(duplicateCount?('发现 '+duplicateCount+' 天，请检查预览'):'未发现')+'\n\n第一条预览：\n'+JSON.stringify(first,null,2).slice(0,1200);
   }catch(e){
     lastImportPreview=null;
     out.textContent='识别失败：'+e.message;
   }
+}
+function resetPlanSpecificStateForImport(){
+  state.currentIndex=0;
+  state.selectedCalendarIndex=0;
+  state.dateAnchors={};
+  state.actualDates={};
+  state.lastActualIndex=null;
+  state.lastActualDate='';
+  state.completed={};
+  state.currentWorkoutDrafts={};
+  state.currentWorkoutLogDraft=null;
+  state.endReminderFlags={};
+  var retainedWarmups={};
+  Object.keys(state.customWarmups||{}).forEach(function(key){
+    if(!/^idx_\d+$/.test(key)) retainedWarmups[key]=state.customWarmups[key];
+  });
+  state.customWarmups=retainedWarmups;
 }
 function applyImportPlan(){
   if(!lastImportPreview) previewImportPlan();
@@ -452,7 +504,8 @@ function applyImportPlan(){
   if(lastImportPreview.warmups && lastImportPreview.warmups.length) WARMUPS=lastImportPreview.warmups;
   localStorage.setItem(KEY+'_importedPlan', JSON.stringify(PLAN));
   if(lastImportPreview.warmups && lastImportPreview.warmups.length) localStorage.setItem(KEY+'_importedWarmups', JSON.stringify(WARMUPS));
-  state.currentIndex=0; state.dateAnchors={}; state.actualDates={}; state.lastActualIndex=null; state.lastActualDate=''; saveState();
+  resetPlanSpecificStateForImport();
+  saveState();
   autoSeedTemplatesFromPlan();
   rebuild();
   alert('已应用导入计划：'+lastImportPreview.plan.length+'天。');
@@ -535,8 +588,9 @@ function importExcelFile(file){
       var parsed=parseWorkbookToImport(wb, file);
       lastImportPreview=parsed;
       var first=parsed.plan[0]||{};
+      var duplicateCount=(parsed.validation&&parsed.validation.duplicateDays&&parsed.validation.duplicateDays.length)||0;
       if(status) status.textContent='已读取：'+file.name+'｜工作表：'+(parsed.sheetName||'自动识别')+'｜训练日 '+parsed.plan.length+' 天';
-      if(out) out.textContent='识别格式：'+parsed.type+'\n来源文件：'+file.name+'\n实际导入工作表：'+(parsed.sheetName||'自动识别')+'\n工作表候选排序：'+(parsed.candidates?parsed.candidates.join(' → '):'')+'\n训练日数量：'+parsed.plan.length+'\n热身模板数量：'+(parsed.warmups?parsed.warmups.length:'沿用表内热身模板')+'\n\n第一天主题：'+(first['训练主题']||'')+'\n\n第一天热身内容：\n'+String(first['导入热身内容']||'').slice(0,500)+'\n\n第一天主训练内容：\n'+String(first['训练内容（组×次数/余力）']||'').slice(0,900)+'\n\n确认没问题后，点「应用导入计划」。';
+      if(out) out.textContent='识别格式：'+parsed.type+'\n来源文件：'+file.name+'\n实际导入工作表：'+(parsed.sheetName||'自动识别')+'\n工作表候选排序：'+(parsed.candidates?parsed.candidates.join(' → '):'')+'\n训练日数量：'+parsed.plan.length+'\n热身模板数量：'+(parsed.warmups?parsed.warmups.length:'沿用表内热身模板')+'\n同日重复动作检查：'+(duplicateCount?('发现 '+duplicateCount+' 天，请先检查'):'未发现')+'\n\n第一天主题：'+(first['训练主题']||'')+'\n\n第一天热身内容：\n'+String(first['导入热身内容']||'').slice(0,500)+'\n\n第一天主训练内容：\n'+String(first['训练内容（组×次数/余力）']||'').slice(0,900)+'\n\n确认没问题后，点「应用导入计划」。';
     }catch(err){
       lastImportPreview=null;
       if(status) status.textContent='读取失败：'+err.message;

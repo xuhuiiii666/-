@@ -1,6 +1,6 @@
-const TRAINING_SECTION_TITLES = ['功能/热身','功能模块','热身','主项','主辅助','正式训练','主训练','辅助','康复/辅助','康复辅助','核心','有氧','恢复','休息','执行','可选恢复'];
+const TRAINING_SECTION_TITLES = ['功能/热身','功能模块','热身','主项','主辅助','正式训练','主训练','功能循环','功能训练','训练循环','辅助','康复/辅助','康复辅助','核心','有氧','恢复','休息','执行','可选恢复'];
 const WARMUP_SECTION_TITLES = ['功能/热身','功能模块','热身'];
-const MAIN_SECTION_TITLES = ['主项','主辅助','正式训练','主训练','辅助','康复/辅助','康复辅助','核心','有氧','执行'];
+const MAIN_SECTION_TITLES = ['主项','主辅助','正式训练','主训练','功能循环','功能训练','训练循环','辅助','康复/辅助','康复辅助','核心','有氧','执行'];
 const RECOVERY_SECTION_TITLES = ['恢复','休息','可选恢复'];
 
 function normalizeParserText(value){
@@ -146,7 +146,8 @@ function classifyTrainingDay(day){
   var firstLine = (content.split(/\n|\|/)[0] || '');
   var t = [title, type, stage, label, firstLine].join(' ');
 
-  if(/休息日|完全休息|恢复日|恢复\s*$|休息\/轻活动|轻活动|轻有氧|Zone\s*2|有氧恢复/.test(t)) return {kind:'休息', cls:'calRest', label:'休息/恢复'};
+  if(/休息日|完全休息|恢复日|恢复\s*$|休息\/轻活动|轻活动|轻有氧|有氧恢复/.test(t)) return {kind:'休息', cls:'calRest', label:'休息/恢复'};
+  if(/有氧日|正式有氧|有氧训练|Zone\s*2/i.test(t)) return {kind:'有氧', cls:'calOther', label:'有氧'};
   if(/硬拉|后链|髋铰链|拉\+髋铰链|技术/.test(t)) return {kind:'后链/硬拉', cls:'calTech', label:'技术/硬拉'};
   if(/下肢A|深蹲主导|前蹲主导|前蹲|深蹲/.test(t)) return {kind:'下肢A', cls:'calLowerA', label:'下肢A'};
   if(/下肢B|单腿|臀腿|臀推|后侧/.test(t)) return {kind:'下肢B', cls:'calLowerB', label:'下肢B'};
