@@ -40,6 +40,94 @@ function parseRestSeconds(value){
   return {min:min, max:max, def:min, raw:(max !== min ? min + '-' + max + '秒' : min + '秒')};
 }
 
+function detectCompoundExercise(line, exerciseName, plannedReps){
+  var raw = normalizeParserText([line,exerciseName].filter(Boolean).join(' '));
+  var name = String(exerciseName || '').trim();
+  var reps = String(plannedReps || '').trim();
+  var baseName = name;
+  var requirementSource = normalizeParserText(line || name);
+  if(/组合要求[:：]/.test(requirementSource)) requirementSource=requirementSource.split(/组合要求[:：]/).pop().trim();
+  requirementSource=requirementSource.replace(/^\s*\d+[\.、\)、)]\s*/,'').replace(/^[\-•]\s*/,'').trim();
+  var requirementText = requirementSource
+    .replace(/\d{1,2}\s*(?:组\s*)?[x×＊*]\s*[\d–\-~至]+(?:\s*次)?/ig, ' ')
+    .replace(/(?:余力|RIR)\s*[:：]?\s*[\d–\-~至\.]+/ig, ' ')
+    .replace(/休息\s*[:：]?\s*[\d–\-~至\.]+\s*(?:秒|分钟|min|s)?/ig, ' ')
+    .replace(/建议(?:重量)?\s*[\d\.]+\s*(?:kg|lb)?/ig, ' ');
+  var explicitDropReps = [];
+  var repMatch;
+  var repPattern = /(\d+(?:\.\d+)?(?:\s*[-–~至]\s*\d+(?:\.\d+)?)?)\s*次/g;
+  while((repMatch=repPattern.exec(requirementText))) explicitDropReps.push(repMatch[1].replace(/\s+/g,''));
+  if(explicitDropReps.length && /\d{1,2}\s*(?:组\s*)?[x×＊*]\s*[\d.]+\s*次?\s*(?:→|➜|➡|＞|>|\+|＋)/i.test(requirementSource)){
+    explicitDropReps.unshift(reps);
+  }
+  function dropRep(index){
+    return explicitDropReps.length>1?(explicitDropReps[index]||''):(index===0?reps:'');
+  }
+  var dropParts=requirementSource.split(/\s*(?:→|➜|➡|＞|>)\s*/).map(function(part){return part.trim();}).filter(Boolean);
+  function dropSegmentName(index,fallback){
+    if(dropParts.length<2 || !dropParts[index]) return fallback;
+    var cleanedPart=dropParts[index]
+      .replace(/(?:机械递减|递减组?|降重组?|drop\s*set)/ig,'')
+      .replace(/\d{1,2}\s*(?:组\s*)?[x×＊*]\s*/ig,'')
+      .replace(/\d+(?:\.\d+)?(?:\s*[-–~至]\s*\d+(?:\.\d+)?)?\s*次/ig,'')
+      .replace(/\d+\s*组/ig,'')
+      .replace(/(?:余力|RIR)\s*[:：]?\s*[\d–\-~至\.]+/ig,'')
+      .replace(/休息\s*[:：]?\s*[\d–\-~至\.]+\s*(?:秒|分钟|min|s)?/ig,'')
+      .replace(/[（）()]/g,'')
+      .replace(/^[：:\s]+|[：:｜|\s]+$/g,'')
+      .trim();
+    return /[A-Za-z\u3400-\u9fff]/.test(cleanedPart)?cleanedPart:fallback;
+  }
+  if(/机械递减/.test(raw)){
+    baseName = name.replace(/机械递减(?:组)?/g, '').trim() || name;
+    return {
+      type:'mechanical-drop',
+      label:'机械递减组',
+      cue:explicitDropReps.length>1?'每轮按原计划标注的 A/B/C 要求连续完成，段间不休；整轮结束后再休息。':'每轮三段连续完成，段间不休。原计划未写递减段重量/次数，空白处请按现场实际填写；整轮结束后再休息。',
+      segments:[
+        {key:'A', label:'主段', name:dropSegmentName(0,baseName), reps:dropRep(0)},
+        {key:'B', label:'递减 1', name:dropSegmentName(1,'降低动作难度后继续'), reps:dropRep(1)},
+        {key:'C', label:'递减 2', name:dropSegmentName(2,'再次降低难度或做有效半程'), reps:dropRep(2)}
+      ]
+    };
+  }
+  if(/递减组|降重组|drop\s*set/i.test(raw)){
+    baseName = name.replace(/(?:递减组?|降重组?|drop\s*set)/ig, '').trim() || name;
+    return {
+      type:'drop-set',
+      label:'递减组',
+      cue:explicitDropReps.length>1?'每轮按原计划标注的 A/B/C 要求连续完成，段间不休；整轮结束后再休息。':'每轮主段完成后立即降重继续，段间不休。原计划未写的递减段重量/次数请按实际填写；整轮结束后再休息。',
+      segments:[
+        {key:'A', label:'主段', name:dropSegmentName(0,baseName), reps:dropRep(0)},
+        {key:'B', label:'递减 1', name:dropSegmentName(1,'第一次降重'), reps:dropRep(1)},
+        {key:'C', label:'递减 2', name:dropSegmentName(2,'第二次降重'), reps:dropRep(2)}
+      ]
+    };
+  }
+  if(/超级组|超級組|superset|连做|連做|无休(?:息)?/i.test(raw)){
+    var cleaned = requirementText.replace(/(?:超级组|超級組|superset|连做|連做|无休(?:息)?)/ig, '').replace(/^[：:\s]+|[：:\s]+$/g, '');
+    var parts = cleaned.split(/\s*(?:\+|＋|→|&|＆|、)\s*/).map(function(x){return x.trim();}).filter(Boolean);
+    if(parts.length < 2) parts = ['动作 A','动作 B'];
+    return {
+      type:'superset',
+      label:'超级组',
+      cue:'A/B 动作连续完成，动作间不休；完成整轮后再按计划休息。',
+      segments:parts.slice(0,4).map(function(part,idx){
+        var partRep=(part.match(/(\d+(?:\.\d+)?(?:\s*[-–~至]\s*\d+(?:\.\d+)?)?)\s*次/)||[])[1]||reps;
+        var partName=part
+          .replace(/\d+(?:\.\d+)?(?:\s*[-–~至]\s*\d+(?:\.\d+)?)?\s*次/g,'')
+          .replace(/\d+\s*组/g,'')
+          .replace(/[，,]?\s*(?:动作间|段间)?\s*无休(?:息)?(?:连续完成)?$/i,'')
+          .replace(/[，,]?\s*(?:动作间|段间)\s*$/,'')
+          .replace(/[：:｜|，,]+$/g,'')
+          .trim();
+        return {key:String.fromCharCode(65+idx), label:'动作 '+String.fromCharCode(65+idx), name:partName||('动作 '+String.fromCharCode(65+idx)), reps:partRep.replace(/\s+/g,'')};
+      })
+    };
+  }
+  return null;
+}
+
 function parseExerciseLine(line){
   var raw = String(line || '').trim();
   var text = normalizeParserText(raw);

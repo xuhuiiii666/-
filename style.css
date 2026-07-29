@@ -1117,3 +1117,67 @@ body{
   .anchorCalibrationHead span{max-width:72%;font-size:9px}
   .anchorCalibrationBody [data-anchor-result]{font-size:11px}
 }
+
+/* ===== 递减组 / 超级组：每轮内分段执行 ===== */
+.compoundBadge{
+  display:inline-block;
+  padding:2px 6px;
+  border-radius:6px;
+  background:rgba(245,197,66,.12);
+  color:#f1cc65;
+  font-size:11px;
+  font-weight:800;
+}
+.compoundCue{
+  margin:0 0 8px;
+  padding:7px 9px;
+  border-left:3px solid rgba(245,197,66,.72);
+  background:rgba(245,197,66,.07);
+  color:#cbd5df;
+  font-size:12px;
+  line-height:1.5;
+}
+.compoundSet{
+  padding:8px 0 10px!important;
+  border-top:1px solid rgba(148,163,184,.14);
+}
+.compoundSet:first-child{border-top:0}
+.compoundSegments{
+  display:grid;
+  gap:6px;
+  width:100%;
+  min-width:0;
+}
+.compoundSegment{
+  min-width:0;
+  padding:7px;
+  border:1px solid rgba(148,163,184,.18);
+  border-radius:8px;
+  background:rgba(11,17,24,.42);
+}
+.compoundSegmentHead{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:6px;
+  min-width:0;
+  font-size:11px;
+  line-height:1.35;
+}
+.compoundSegmentHead b{flex:0 0 auto;color:#f1cc65}
+.compoundSegmentHead span{
+  min-width:0;
+  overflow-wrap:anywhere;
+  color:var(--muted);
+  text-align:right;
+}
+.compoundSet>.row{width:100%;min-width:0}
+@media(max-width:640px){
+  .compoundCue{font-size:11px;padding:6px 8px}
+  .compoundSet>.setRoundLabel{margin-bottom:3px!important}
+  .compoundSegment{padding:6px}
+  .compoundSegmentHead{align-items:flex-start}
+  .compoundSegmentHead span{max-width:68%}
+  .compoundSet>.row{grid-column:1/-1!important}
+}

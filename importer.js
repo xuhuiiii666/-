@@ -104,9 +104,19 @@ function parseStructuredHead(head){
 function formatItemForImport(item, mode){
   var h=parseStructuredHead(item.head);
   var rest=findRestInDetails(item.details) || h.rest.replace(/休息\s*[:：]?/,'');
+  var compoundDetail=(item.details||[]).find(function(line){return /机械递减|递减组|降重组|drop\s*set|超级组|超級組|superset|连做|連做|无休(?:息)?/i.test(line);})||'';
+  var compoundSource=compoundDetail || (/机械递减|递减组|降重组|drop\s*set|超级组|超級組|superset|连做|連做|无休(?:息)?/i.test(item.head||'')?(item.head||''):'');
   var reps=String(h.reps||'').trim();
   var sets=h.sets||'1';
   var name=h.name||'训练项目';
+  if(compoundSource && typeof detectCompoundExercise==='function'){
+    var compoundMeta=detectCompoundExercise(compoundSource,name,reps);
+    if(compoundMeta&&compoundMeta.type==='superset'){
+      name='超级组：'+compoundMeta.segments.map(function(segment){return segment.name;}).join(' + ');
+    }else if(compoundMeta){
+      name=name.replace(/\s*(?:(?:→|➜|➡|＞|>|\+|＋)\s*\d+(?:\.\d+)?(?:\s*[-–~至]\s*\d+(?:\.\d+)?)?\s*次?)+\s*$/,'').trim();
+    }
+  }
   if(mode==='warm'){
     var restPart=rest ? (' 休息'+firstNumberRange(rest)+'秒') : '';
     if(/秒|s/i.test(reps)) return (name+' '+firstNumberRange(reps)+'sx'+sets+restPart).trim();
@@ -114,10 +124,12 @@ function formatItemForImport(item, mode){
     if(/呼吸/.test(reps)) return (name+' '+sets+'x'+(firstNumberRange(reps)||reps)+restPart).trim();
     return (name+' '+sets+'x'+(firstNumberRange(reps)||reps)+restPart).trim();
   }
-  var out=name+' '+sets+'x'+(firstNumberRange(reps)||reps||'');
+  var out=name+(reps?(' '+sets+'x'+(firstNumberRange(reps)||reps)):('｜'+sets+'组'));
   if(h.rir) out+='（余力'+h.rir+'）';
   if(h.suggest) out+='｜'+h.suggest.replace(/^建议(?!重量)/,'建议');
   if(rest) out+='｜休息：'+rest;
+  var needsCompoundRequirement=!!compoundDetail || /超级组|超級組|superset|连做|連做|无休(?:息)?/i.test(compoundSource) || /(?:→|➜|➡|＞|>|\+|＋)/.test(compoundSource) || ((compoundSource.match(/\d+(?:\.\d+)?\s*次/g)||[]).length>1);
+  if(compoundSource && needsCompoundRequirement) out+='｜组合要求：'+stripBullets(compoundSource);
   return out.trim();
 }
 function extractSectionBlock(content, title){

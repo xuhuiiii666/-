@@ -286,7 +286,7 @@ function buildExerciseHistoryFromLogs(workoutLogs){
       itemSets.forEach(function(st,si){
         st=st||{};
         var weightKg=Number(st.weightKg||weightToKg(st.weight,st.unit||'kg')||0);
-        var setObj={set:st.set||st.index||st.setIndex||si+1,weight:st.weight||'',unit:st.unit||'kg',weightKg:Math.round(weightKg*10)/10,reps:st.reps||'',rir:st.rir||st.RIR||'',duration:st.duration||'',rest:st.rest||'',note:st.note||item.note||'',e1rm:st.e1rm||Math.round(e1rm(weightKg,st.reps)*10)/10};
+        var setObj={set:st.set||st.index||st.setIndex||si+1,round:st.round||'',segment:st.segment||'',segmentLabel:st.segmentLabel||'',segmentName:st.segmentName||'',weight:st.weight||'',unit:st.unit||'kg',weightKg:Math.round(weightKg*10)/10,reps:st.reps||'',rir:st.rir||st.RIR||'',duration:st.duration||'',rest:st.rest||'',note:st.note||item.note||'',e1rm:st.e1rm||Math.round(e1rm(weightKg,st.reps)*10)/10};
         if(hasMeaningfulSet(setObj)) grouped[key].sets.push(setObj);
       });
     });
@@ -341,10 +341,10 @@ function normalizeSetNumbersInDom(scope){
     var no=idx+1;
     row.setAttribute('data-set-no',no);
     row.querySelectorAll('[data-set]').forEach(function(el){el.setAttribute('data-set',no);});
-    var label=row.querySelector('label');
+    var label=row.querySelector('.setRoundLabel')||row.querySelector('label');
     if(label){
       var isMain=!!row.closest('.mainCard');
-      label.textContent=isMain?('第'+no+'/'+total+'组'):('第'+no+'组');
+      label.textContent=isMain?(row.classList.contains('compoundSet')?('第'+no+'/'+total+'轮'):('第'+no+'/'+total+'组')):('第'+no+'组');
     }
   });
   var mainCard=scope&&scope.closest&&scope.closest('.mainCard');
@@ -360,7 +360,23 @@ function readSetRow(row){
   var id=row.getAttribute&&row.getAttribute('data-set-id');
   if(!id){ id=createSetId(row.closest&&row.closest('.warmCard')?'warm':'main'); if(row.setAttribute) row.setAttribute('data-set-id',id); }
   var weight=get('[data-field="weight"]'), unit=get('[data-field="unit"]')||'kg';
-  return {setId:id,setNo:parseInt(row.getAttribute('data-set-no')||row.getAttribute('data-set')||'0',10)||0,weight:weight,unit:unit,weightKg:Math.round(weightToKg(weight,unit)*10)/10,reps:get('[data-field="reps"]'),rir:get('[data-field="rir"]'),duration:get('[data-field="duration"]'),rest:Number(range?range.value:90)||90,note:'',completed:row.classList&&row.classList.contains('done'),timerState:(rowTimers[id]&&rowTimers[id].running)?'running':'idle'};
+  var data={setId:id,setNo:parseInt(row.getAttribute('data-set-no')||row.getAttribute('data-set')||'0',10)||0,weight:weight,unit:unit,weightKg:Math.round(weightToKg(weight,unit)*10)/10,reps:get('[data-field="reps"]'),rir:get('[data-field="rir"]'),duration:get('[data-field="duration"]'),rest:Number(range?range.value:90)||90,note:'',completed:row.classList&&row.classList.contains('done'),timerState:(rowTimers[id]&&rowTimers[id].running)?'running':'idle'};
+  var segments=Array.prototype.slice.call(row.querySelectorAll&&row.querySelectorAll('.compoundSegment')||[]).map(function(segment,idx){
+    var segmentGet=function(field){var x=segment.querySelector('[data-field="'+field+'"]');return x?x.value:'';};
+    var segmentWeight=segmentGet('weight'), segmentUnit=segmentGet('unit')||'kg';
+    return {
+      key:segment.getAttribute('data-segment-key')||String.fromCharCode(65+idx),
+      label:segment.getAttribute('data-segment-label')||'',
+      name:segment.getAttribute('data-segment-name')||'',
+      weight:segmentWeight,
+      unit:segmentUnit,
+      weightKg:Math.round(weightToKg(segmentWeight,segmentUnit)*10)/10,
+      reps:segmentGet('reps'),
+      rir:segmentGet('rir')
+    };
+  });
+  if(segments.length) data.segments=segments;
+  return data;
 }
 function writeSetRow(row,data){
   if(!row||!data) return;
@@ -373,6 +389,28 @@ function writeSetRow(row,data){
   set('[data-field="rir"]',data.rir);
   set('[data-field="duration"]',data.duration);
   set('input[type=range]',data.rest);
+  if(Array.isArray(data.segments)){
+    var segmentNodes=Array.prototype.slice.call(row.querySelectorAll('.compoundSegment'));
+    data.segments.forEach(function(segmentData,idx){
+      var segment=segmentNodes.find(function(node){return node.getAttribute('data-segment-key')===String(segmentData.key||'');})||segmentNodes[idx];
+      if(!segment) return;
+      if(segmentData.label!==undefined){
+        segment.setAttribute('data-segment-label',segmentData.label||'');
+        var labelNode=segment.querySelector('.compoundSegmentHead b');
+        if(labelNode) labelNode.textContent=(segmentData.key||segment.getAttribute('data-segment-key')||String.fromCharCode(65+idx))+'｜'+(segmentData.label||'动作');
+      }
+      if(segmentData.name!==undefined){
+        segment.setAttribute('data-segment-name',segmentData.name||'');
+        var nameNode=segment.querySelector('.compoundSegmentHead span');
+        if(nameNode) nameNode.textContent=segmentData.name||'';
+      }
+      var setSegment=function(field,val){var input=segment.querySelector('[data-field="'+field+'"]');if(input&&val!==undefined) input.value=val==null?'':val;};
+      setSegment('weight',segmentData.weight);
+      setSegment('unit',segmentData.unit||'kg');
+      setSegment('reps',segmentData.reps);
+      setSegment('rir',segmentData.rir);
+    });
+  }
   var dt=row.querySelector('.actionTimer');
   if(dt) dt.textContent=data.duration?fmt(parseInt(data.duration,10)||0):'--:--';
 }
@@ -484,7 +522,7 @@ function restoreCurrentWorkoutDraft(){
     while(wrap && rows.length<(saved.sets||[]).length){
       var st=(saved.sets||[])[rows.length]||{};
       var custom=card.hasAttribute('data-custom-main');
-      wrap.insertAdjacentHTML('beforeend',mainSetHTML(idx,rows.length+1,st.reps||'',st.rir||'',{min:60,max:240,def:st.rest||120,label:custom?'自定':'辅助'},st.duration||'',custom,(saved.sets||[]).length,st.setId));
+      wrap.insertAdjacentHTML('beforeend',mainSetForCardHTML(card,idx,rows.length+1,st.reps||'',st.rir||'',{min:60,max:240,def:st.rest||120,label:custom?'自定':'辅助'},st.duration||'',custom,(saved.sets||[]).length,st.setId));
       rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow'));
     }
     (saved.sets||[]).forEach(function(st,i){ if(rows[i]) writeSetRow(rows[i],st); });
@@ -754,10 +792,10 @@ function renumberSetRows(scope){
   rows.forEach(function(row,idx){
     var n=idx+1;
     row.setAttribute('data-set', n);
-    var label=row.querySelector('label');
+    var label=row.querySelector('.setRoundLabel')||row.querySelector('label');
     if(label){
       var isMain=row.closest('.mainCard');
-      label.textContent = isMain ? ('第'+n+(total?('/'+total):'')+'组') : ('第'+n+'组');
+      label.textContent = isMain ? (row.classList.contains('compoundSet')?('第'+n+(total?('/'+total):'')+'轮'):('第'+n+(total?('/'+total):'')+'组')) : ('第'+n+'组');
     }
     row.querySelectorAll('[data-set]').forEach(function(el){el.setAttribute('data-set', n);});
   });
@@ -974,13 +1012,15 @@ function renderModuleMap(){
 function lastReferenceHTML(name){
   var rec=getLastExercisePerformance(name);
   if(rec){
-    var entries=(rec.sets||[]).slice(0,5);
+    var allEntries=rec.sets||[];
+    var entries=allEntries.slice(0,allEntries.some(function(e){return !!e.segment;})?16:5);
     var parts=entries.map(function(e){
       var w=e.weight?displayWeight(e.weight,e.unit||'kg'):'';
       var reps=e.reps?('×'+e.reps):'';
       var rir=e.rir?(' RIR '+e.rir):'';
       var dur=e.duration?(' '+e.duration+'s'):'';
-      return (e.set?('第'+e.set+'组 '):'')+(w||dur||'-')+reps+rir;
+      var setLabel=e.segment?('第'+(e.round||e.set||'-')+'轮'+e.segment+' '):(e.set?('第'+e.set+'组 '):'');
+      return setLabel+(w||dur||'-')+reps+rir;
     });
     var best=Math.max.apply(null, entries.map(function(e){return e.e1rm||e1rm(e.weightKg||weightToKg(e.weight,e.unit||'kg'),e.reps)||0;}));
     var e1=best&&isFinite(best)?('｜最高e1RM '+(Math.round(best*10)/10)) : '';
@@ -1002,6 +1042,11 @@ function anchorCalibrationHTML(){
 }
 function ensureAnchorCalibrationForCard(card){
   if(!card) return;
+  if(card.hasAttribute('data-compound-type')){
+    var old=card.querySelector('[data-anchor-calibration]');
+    if(old) old.remove();
+    return;
+  }
   var rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow'));
   if(!rows.length) return;
   var anchor=card.querySelector('[data-anchor-calibration]');
@@ -1085,6 +1130,58 @@ function refreshAllAnchorAssessments(){
   });
 }
 
+function compoundSpecForExercise(ex){
+  if(typeof detectCompoundExercise!=='function') return null;
+  return detectCompoundExercise((ex&&ex.line)||'',(ex&&ex.name)||'',(ex&&ex.reps)||'');
+}
+function compoundSpecFromCard(card){
+  if(!card||!card.hasAttribute('data-compound-type')) return null;
+  var first=card.querySelector('.compoundSet');
+  var segments=Array.prototype.slice.call(first?first.querySelectorAll('.compoundSegment'):[]).map(function(segment,idx){
+    var reps=segment.querySelector('[data-field="reps"]');
+    return {
+      key:segment.getAttribute('data-segment-key')||String.fromCharCode(65+idx),
+      label:segment.getAttribute('data-segment-label')||'',
+      name:segment.getAttribute('data-segment-name')||'',
+      reps:reps?reps.value:''
+    };
+  });
+  return {
+    type:card.getAttribute('data-compound-type')||'compound',
+    label:card.getAttribute('data-compound-label')||'复合组',
+    cue:(card.querySelector('.compoundCue')&&card.querySelector('.compoundCue').textContent)||'完成整轮后再休息。',
+    segments:segments
+  };
+}
+function compoundMainSetHTML(ei,s,reps,rir,rest,custom,totalSets,setId,compound){
+  var id=setId||createSetId((custom?'c':'e')+ei);
+  var rr=rest||{min:90,max:180,def:120,label:'自定'};
+  rr.def=Number(rr.def||120)||120;
+  var totalTxt=totalSets?('/'+totalSets):'';
+  var segments=(compound&&compound.segments)||[];
+  var segmentHTML=segments.map(function(segment,idx){
+    var key=segment.key||String.fromCharCode(65+idx);
+    var segmentReps=segment.reps!==undefined?segment.reps:(idx===0?reps:'');
+    var segmentRir=idx===0?rir:(compound.type==='superset'?rir:'');
+    var exKey=custom?'custom_'+ei:ei;
+    return `<div class="compoundSegment" data-segment-key="${escapeHtml(key)}" data-segment-label="${escapeHtml(segment.label||'')}" data-segment-name="${escapeHtml(segment.name||'')}">
+      <div class="compoundSegmentHead"><b>${escapeHtml(key)}｜${escapeHtml(segment.label||'动作')}</b><span>${escapeHtml(segment.name||'')}</span></div>
+      <div class="liftLine">
+        <input data-ex="${exKey}" data-set="${s}" data-segment-key="${escapeHtml(key)}" data-field="weight" placeholder="重量" type="number" step="0.5" value="">
+        <select class="unitSelect" data-field="unit"><option value="kg" selected>kg</option><option value="lb">lb</option></select>
+        <span class="op">×</span>
+        <input data-ex="${exKey}" data-set="${s}" data-segment-key="${escapeHtml(key)}" data-field="reps" placeholder="次数" type="number" step="1" value="${escapeHtml(segmentReps||'')}">
+        <span class="op">-</span>
+        <input data-ex="${exKey}" data-set="${s}" data-segment-key="${escapeHtml(key)}" data-field="rir" placeholder="余力" value="${escapeHtml(segmentRir||'')}">
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="setrow compoundSet" id="row_${id}" data-set-id="${id}" data-set-no="${s}" ${custom?'data-custom-main-row="1"':''}>
+    <label class="setRoundLabel">第${s}${totalTxt}轮</label>
+    <div class="compoundSegments">${segmentHTML}</div>
+    <div class="row" style="gap:6px">${restControlHTML(id,rr,'完成本轮并开始休息')}<button class="delBtn" onclick="removeMainSet(this)">删除这一轮</button></div>
+  </div>`;
+}
 function mainSetHTML(ei,s,reps,rir,rest,duration,custom,totalSets,setId){
   var id=setId||createSetId((custom?'c':'e')+ei);
   var rr=rest||{min:90,max:180,def:120,label:'自定'};
@@ -1106,9 +1203,14 @@ function mainSetHTML(ei,s,reps,rir,rest,duration,custom,totalSets,setId){
     ${s===1?anchorCalibrationHTML():''}
   </div>`;
 }
+function mainSetForCardHTML(card,ei,s,reps,rir,rest,duration,custom,totalSets,setId){
+  var compound=compoundSpecFromCard(card);
+  return compound?compoundMainSetHTML(ei,s,reps,rir,rest,custom,totalSets,setId,compound):mainSetHTML(ei,s,reps,rir,rest,duration,custom,totalSets,setId);
+}
 function mainCardHTML(ex,ei,w,custom){
   var suggested=custom?'':suggestWeight(ex.name, ex.reps);
   var rr=custom?{min:60,max:240,def:120,label:'自定'}:restRangeFor(ex,w);
+  var compound=compoundSpecForExercise(ex);
   var setCount=parseInt(ex.sets,10)||1;
   var repTxt=String(ex.reps||'');
   var rirTxt=String(ex.rir||'');
@@ -1118,18 +1220,19 @@ function mainCardHTML(ex,ei,w,custom){
   var statusCls=exists?'':' hidden';
   var cardId=safeDomId('mainCard',ei,ex.trackName||ex.name||originalName);
   var nameInput = `<div class="nameEditBox"><input class="editableTitle" data-field="mainName" data-original-name="${escapeHtml(originalName)}" value="${escapeHtml(ex.name||originalName)}" placeholder="训练名称" oninput="updateOriginalNameHint(this);renderModuleMap();refreshMainCardTemplateStatus(this.closest('.mainCard'))"><div class="originalNameHint">原计划：${escapeHtml(originalName)}</div></div>`;
-  var planSummary=`<div class="planSummary">计划：<b>${setCount}</b> 组 × <b>${escapeHtml(repTxt||'-')}</b> 次${rirTxt?'｜余力 <b>'+escapeHtml(rirTxt)+'</b>':''}</div>`;
-  var html=`<div id="${cardId}" class="exercise mainCard" data-card-id="${cardId}" data-plan-sets="${setCount}" data-plan-reps="${escapeHtml(repTxt)}" data-plan-rir="${escapeHtml(rirTxt)}" data-original-name="${escapeHtml(originalName)}" data-track-name="${escapeHtml(ex.trackName||ex.name||originalName)}" draggable="true" ondragstart="dragModuleStart(event)" ondragover="dragModuleOver(event)" ondrop="dropModule(event)" ${custom?'data-custom-main="1"':''}>
+  var planSummary=`<div class="planSummary">计划：<b>${setCount}</b> ${compound?'轮':'组'} × <b>${escapeHtml(repTxt||'-')}</b> 次${rirTxt?'｜余力 <b>'+escapeHtml(rirTxt)+'</b>':''}${compound?'｜<span class="compoundBadge">'+escapeHtml(compound.label)+'</span>':''}</div>`;
+  var compoundAttrs=compound?` data-compound-type="${escapeHtml(compound.type)}" data-compound-label="${escapeHtml(compound.label)}"`:'';
+  var html=`<div id="${cardId}" class="exercise mainCard${compound?' compoundCard':''}" data-card-id="${cardId}" data-plan-sets="${setCount}" data-plan-reps="${escapeHtml(repTxt)}" data-plan-rir="${escapeHtml(rirTxt)}" data-original-name="${escapeHtml(originalName)}" data-track-name="${escapeHtml(ex.trackName||ex.name||originalName)}"${compoundAttrs} draggable="true" ondragstart="dragModuleStart(event)" ondragover="dragModuleOver(event)" ondrop="dropModule(event)" ${custom?'data-custom-main="1"':''}>
     <div class="row between moduleHead">
       <div class="row">${nameInput}</div>
       <div class="moduleTools"><button onclick="moveModule(this,-1)">上移</button><button onclick="moveModule(this,1)">下移</button><button class="blue" onclick="openExerciseTemplateSwitcher(this)">切换动作</button><button class="blue${saveCls}" data-template-save-main="1" onclick="saveMainCardAsTemplate(this)">保存此动作</button><span class="pill${statusCls}" data-template-status-main="1">已在动作库</span>${custom?'<button class="bad" onclick="removeMainProject(this)">删除</button>':''}<span class="pill">${escapeHtml(ex.line||'手动项目')}</span></div>
-    </div>${planSummary}${lastReferenceHTML(ex.trackName||ex.name||originalName)}`;
+    </div>${planSummary}${compound?'<div class="compoundCue">'+escapeHtml(compound.cue)+'</div>':''}${lastReferenceHTML(ex.trackName||ex.name||originalName)}`;
   if(suggested) html+=`<div class="small">参考：按历史最高 e1RM 换算，本次目标 ${escapeHtml(ex.reps)} 次约 ${suggested}kg。上次记录见右侧。</div>`;
   html+='<div class="moduleBody"><div class="mainSets">';
   for(var s=1;s<=setCount;s++){
-    html+=mainSetHTML(ei,s,repTxt,rirTxt,rr,'',custom,setCount);
+    html+=compound?compoundMainSetHTML(ei,s,repTxt,rirTxt,rr,custom,setCount,null,compound):mainSetHTML(ei,s,repTxt,rirTxt,rr,'',custom,setCount);
   }
-  html+='</div><div class="row warmTools"><button class="addSetBtn blue" onclick="addMainSet(this)">添加下一组</button><button class="addSetBtn" onclick="duplicateMainSet(this)">复制上一组</button></div></div><div class="moduleBottomTools"><button class="collapseBtn" onclick="toggleModuleCollapse(this)">收起</button></div></div>';
+  html+='</div><div class="row warmTools"><button class="addSetBtn blue" onclick="addMainSet(this)">'+(compound?'添加下一轮':'添加下一组')+'</button><button class="addSetBtn" onclick="duplicateMainSet(this)">'+(compound?'复制上一轮':'复制上一组')+'</button></div></div><div class="moduleBottomTools"><button class="collapseBtn" onclick="toggleModuleCollapse(this)">收起</button></div></div>';
   return html;
 }
 function addMainProject(){
@@ -1150,7 +1253,7 @@ function addMainSet(btn){
   var unit=last?last.querySelector('[data-field="unit"]')?.value:'kg';
   var rest=last?parseInt(last.querySelector('input[type=range]')?.value||120,10):120;
   var duration=last?last.querySelector('[data-field="duration"]')?.value:'';
-  sets.insertAdjacentHTML('beforeend', mainSetHTML(ei,n,reps,rir,{min:60,max:240,def:rest,label:custom?'自定':'辅助'},duration,custom,n));
+  sets.insertAdjacentHTML('beforeend', mainSetForCardHTML(card,ei,n,reps,rir,{min:60,max:240,def:rest,label:custom?'自定':'辅助'},duration,custom,n));
   var row=sets.querySelector('.setrow:last-child'); if(row){var u=row.querySelector('[data-field="unit"]'); if(u)u.value=unit||'kg';}
   normalizeSetNumbersInDom(sets);
   bindTrainingDataInputs(document);
@@ -1160,9 +1263,16 @@ function duplicateMainSet(btn){
   var card=btn.closest('.mainCard'), sets=card.querySelector('.mainSets'); var last=sets.querySelector('.setrow:last-child'); if(!last){addMainSet(btn);return;}
   var get=function(sel){var x=last.querySelector(sel);return x?x.value:''}; var rest=last.querySelector('input[type=range]');
   var custom=card.hasAttribute('data-custom-main'); var ei=[].slice.call(document.querySelectorAll('#exercises .mainCard')).indexOf(card); var n=sets.querySelectorAll('.setrow').length+1;
-  sets.insertAdjacentHTML('beforeend', mainSetHTML(ei,n,get('[data-field="reps"]'),get('[data-field="rir"]'),{min:60,max:240,def:parseInt(rest?rest.value:120),label:custom?'自定':'辅助'},get('[data-field="duration"]'),custom,n)); renumberSetRows(sets);
+  var copied=readSetRow(last);
+  copied.setId=createSetId((custom?'c':'e')+ei);
+  copied.setNo=n;
+  copied.completed=false;
+  copied.timerState='idle';
+  sets.insertAdjacentHTML('beforeend', mainSetForCardHTML(card,ei,n,get('[data-field="reps"]'),get('[data-field="rir"]'),{min:60,max:240,def:parseInt(rest?rest.value:120),label:custom?'自定':'辅助'},get('[data-field="duration"]'),custom,n,copied.setId)); renumberSetRows(sets);
   var row=sets.querySelector('.setrow:last-child');
-  if(row){
+  if(row&&card.hasAttribute('data-compound-type')){
+    writeSetRow(row,copied);
+  }else if(row){
     var set=function(sel,val){var x=row.querySelector(sel); if(x)x.value=val||'';};
     set('[data-field="weight"]',get('[data-field="weight"]'));
     set('[data-field="unit"]',get('[data-field="unit"]')||'kg');
@@ -1191,18 +1301,7 @@ function updateExerciseTemplateFromCard(tpl,card,name){
   return tpl;
 }
 function getMainSetsFromCard(card){
-  return Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow')).map(function(row){
-    var get=function(sel){var x=row.querySelector(sel);return x?x.value:'';};
-    var range=row.querySelector('input[type=range]');
-    return {
-      weight:get('[data-field="weight"]'),
-      unit:get('[data-field="unit"]')||'kg',
-      reps:get('[data-field="reps"]'),
-      rir:get('[data-field="rir"]'),
-      duration:get('[data-field="duration"]'),
-      rest:range?parseInt(range.value||120):120
-    };
-  });
+  return Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow')).map(readSetRow);
 }
 function makeExerciseTemplateFromCard(card, nameOverride){
   var inp=card.querySelector('[data-field="mainName"]');
@@ -1306,10 +1405,7 @@ function switchExerciseTemplate(id){
       var rows=Array.prototype.slice.call(newCard.querySelectorAll('.mainSets .setrow'));
       tpl.sets.forEach(function(st,i){
         var row=rows[i]; if(!row) return;
-        var set=function(sel,val){var el=row.querySelector(sel); if(el){el.value=(val==null?'':val); if(el.type==='range') updateRestLabel(el);}};
-        set('[data-field="weight"]',st.weight); set('[data-field="unit"]',st.unit||'kg'); set('[data-field="reps"]',st.reps); set('[data-field="rir"]',st.rir); set('[data-field="duration"]',st.duration);
-        set('input[type=range]',st.rest||120);
-        var dt=row.querySelector('.actionTimer'); if(dt) dt.textContent=st.duration?fmt(parseInt(st.duration)): '--:--';
+        writeSetRow(row,st);
       });
     }catch(e){console.error('切换动作后填充组数据失败',e);}
   }
@@ -1362,10 +1458,7 @@ function applyExerciseTemplate(id){
       var rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow'));
       tpl.sets.forEach(function(st,idx){
         var row=rows[idx]; if(!row) return;
-        var set=function(sel,val){var el=row.querySelector(sel); if(el){el.value=(val==null?'':val); if(el.type==='range') updateRestLabel(el);}};
-        set('[data-field="weight"]',st.weight); set('[data-field="unit"]',st.unit||'kg'); set('[data-field="reps"]',st.reps); set('[data-field="rir"]',st.rir); set('[data-field="duration"]',st.duration);
-        set('input[type=range]',st.rest||120);
-        var dt=row.querySelector('.actionTimer'); if(dt) dt.textContent=st.duration?fmt(parseInt(st.duration)): '--:--';
+        writeSetRow(row,st);
       });
     }catch(e){console.error('调用动作后填充组数据失败',e);}
   }
@@ -1544,13 +1637,13 @@ function restRangeFor(ex,w){
   return {min:state.settings.assistRest||90,max:state.settings.assistRest||90,def:state.settings.assistRest||90,label:'辅助'};
 }
 function fmt(sec){let m=String(Math.floor(sec/60)).padStart(2,'0'),s=String(sec%60).padStart(2,'0');return `${m}:${s}`;}
-function restControlHTML(id,range){
+function restControlHTML(id,range,buttonText){
   let disabled = range.min===range.max ? 'disabled' : '';
   return `<div class="restCell" id="rest_${id}">
     <div>
       <div class="restTop"><span>${range.label}休息</span><b id="rv_${id}">${range.def}s</b></div>
       <input type="range" min="${range.min}" max="${range.max}" step="5" value="${range.def}" ${disabled} oninput="updateRestValue('${id}',this.value)">
-      <button class="primary restBtn" onclick="startRowTimer('${id}')">完成本组并开始休息</button>
+      <button class="primary restBtn" onclick="startRowTimer('${id}')">${escapeHtml(buttonText||'完成本组并开始休息')}</button>
     </div>
     <div class="miniTimer" id="mt_${id}">${fmt(range.def)}</div>
   </div>`;
@@ -1629,7 +1722,7 @@ function handleTrainingDataInput(ev){
     var row=ev.target.closest&&ev.target.closest('.setrow');
     var card=ev.target.closest&&ev.target.closest('.exercise');
     var field=ev.target.getAttribute('data-field');
-    if(row && field){
+    if(row && field && !ev.target.closest('.compoundSegment')){
       updateSetValue(card?(card.getAttribute('data-card-id')||card.id||''):'',row.getAttribute('data-set-id')||String(row.id||'').replace(/^row_/,''),field,ev.target.value);
     }
     saveState();
@@ -1649,12 +1742,46 @@ function bindTrainingDataInputs(scope){
 function updateKpis(){
   let sets=0,vol=0,best=0;
   document.querySelectorAll('#exercises input[data-field="weight"], #warmupExercises input[data-field="weight"]').forEach(w=>{
-    let row=getRowFromWeightInput(w), reps=row.querySelector('[data-field="reps"]'), unit=row.querySelector('[data-field="unit"]'); let ww=weightToKg(w.value,unit?unit.value:'kg'), rr=parseFloat(reps.value);
+    let row=w.closest('.compoundSegment')||getRowFromWeightInput(w), reps=row.querySelector('[data-field="reps"]'), unit=row.querySelector('[data-field="unit"]'); let ww=weightToKg(w.value,unit?unit.value:'kg'), rr=parseFloat(reps&&reps.value);
     if(ww&&rr){sets++;vol+=ww*rr;best=Math.max(best,e1rm(ww,rr));}
   });
   document.getElementById('kpiSets').textContent=sets;
   document.getElementById('kpiVol').textContent=Math.round(vol);
   document.getElementById('kpiE1rm').textContent=Math.round(best*10)/10;
+}
+function collectMainCardEntries(entries,card,meta){
+  if(!card) return;
+  meta=meta||{};
+  var name=(card.querySelector('[data-field="mainName"]')&&card.querySelector('[data-field="mainName"]').value)||meta.name||'训练动作';
+  var originalName=card.getAttribute('data-original-name')||meta.originalName||name;
+  var moduleNote=(card.querySelector('[data-field="moduleNote"]')&&card.querySelector('[data-field="moduleNote"]').value)||'';
+  var type=meta.custom?'自定义主训练':'主训练';
+  var target=meta.target||(meta.custom?'手动新增训练模块':'');
+  Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow')).forEach(function(row,ri){
+    var rest=(row.querySelector('input[type=range]')&&row.querySelector('input[type=range]').value)||'';
+    var segments=Array.prototype.slice.call(row.querySelectorAll('.compoundSegment'));
+    if(segments.length){
+      segments.forEach(function(segment,si){
+        var get=function(field){var x=segment.querySelector('[data-field="'+field+'"]');return x?x.value:'';};
+        var weight=get('weight'), unit=get('unit')||'kg', reps=get('reps'), rir=get('rir');
+        var weightKg=weightToKg(weight,unit);
+        var segmentKey=segment.getAttribute('data-segment-key')||String.fromCharCode(65+si);
+        var segmentLabel=segment.getAttribute('data-segment-label')||'';
+        var segmentName=segment.getAttribute('data-segment-name')||'';
+        if(weight||reps||rir||moduleNote) entries.push({
+          type:type,name:name,trackingName:name,originalName:originalName,trackName:name,
+          set:String(ri+1)+segmentKey,round:ri+1,segment:segmentKey,segmentLabel:segmentLabel,segmentName:segmentName,
+          weight:weight,unit:unit,weightKg:Math.round(weightKg*10)/10,reps:reps,duration:'',rir:rir,rest:rest,
+          note:moduleNote,target:target,e1rm:Math.round(e1rm(weightKg,reps)*10)/10
+        });
+      });
+      return;
+    }
+    var get=function(field){var x=row.querySelector('[data-field="'+field+'"]');return x?x.value:'';};
+    var weight=get('weight'), unit=get('unit')||'kg', reps=get('reps'), rir=get('rir'), duration=get('duration');
+    var weightKg=weightToKg(weight,unit);
+    if(weight||reps||rir||duration||moduleNote) entries.push({type:type,name:name,trackingName:name,originalName:originalName,trackName:name,set:ri+1,weight:weight,unit:unit,weightKg:Math.round(weightKg*10)/10,reps:reps,duration:duration,rir:rir,rest:rest,note:moduleNote,target:target,e1rm:Math.round(e1rm(weightKg,reps)*10)/10});
+  });
 }
 function collectEntries(){
   let w=getWorkout(), exs=parseExercises(w['训练内容（组×次数/余力）']), entries=[];
@@ -1674,27 +1801,10 @@ function collectEntries(){
   });
   exs.forEach((ex,ei)=>{
     let card=document.querySelectorAll('#exercises .mainCard:not([data-custom-main])')[ei];
-    let moduleNote=card?card.querySelector('[data-field="moduleNote"]')?.value||'':'';
-    let rows=[...document.querySelectorAll(`[data-ex="${ei}"][data-field="weight"]`)];
-    rows.forEach(inp=>{
-      let row=getRowFromWeightInput(inp); let unit=row.querySelector('[data-field="unit"]')?.value||'kg'; let weightKg=weightToKg(inp.value,unit); let reps=row.querySelector('[data-field="reps"]').value; let rir=row.querySelector('[data-field="rir"]').value; let duration=row.querySelector('[data-field="duration"]')?.value||'';
-      var mainName=card&&card.querySelector('[data-field=\"mainName\"]')?card.querySelector('[data-field=\"mainName\"]').value:ex.name;
-      var originalName=card?(card.getAttribute('data-original-name')||ex.name):ex.name;
-      if(inp.value||reps||rir||duration||moduleNote) entries.push({type:'主训练',name:mainName,trackingName:mainName,originalName:originalName,trackName:mainName,set:inp.dataset.set,weight:inp.value,unit,weightKg:Math.round(weightKg*10)/10,reps,duration,rir,note:moduleNote,target:ex.line,e1rm:Math.round(e1rm(weightKg,reps)*10)/10});
-    });
+    collectMainCardEntries(entries,card,{name:ex.name,originalName:ex.name,target:ex.line});
   });
   document.querySelectorAll('#exercises .mainCard[data-custom-main]').forEach((card,ci)=>{
-    let name=card.querySelector('[data-field="mainName"]')?.value || ('自定义训练'+(ci+1));
-    let moduleNote=card.querySelector('[data-field="moduleNote"]')?.value||'';
-    card.querySelectorAll('.setrow').forEach((row,ri)=>{
-      let weight=row.querySelector('[data-field="weight"]')?.value||'';
-      let unit=row.querySelector('[data-field="unit"]')?.value||'kg';
-      let weightKg=weightToKg(weight,unit);
-      let reps=row.querySelector('[data-field="reps"]')?.value||'';
-      let rir=row.querySelector('[data-field="rir"]')?.value||'';
-      let duration=row.querySelector('[data-field="duration"]')?.value||'';
-      if(weight||reps||rir||duration||moduleNote) entries.push({type:'自定义主训练',name,trackingName:name,originalName:name,trackName:name,set:ri+1,weight,unit,weightKg:Math.round(weightKg*10)/10,reps,duration,rir,note:moduleNote,target:'手动新增训练模块',e1rm:Math.round(e1rm(weightKg,reps)*10)/10});
-    });
+    collectMainCardEntries(entries,card,{name:'自定义训练'+(ci+1),custom:true,target:'手动新增训练模块'});
   });
   return entries;
 }
@@ -2327,12 +2437,13 @@ function buildWorkoutLogFromCurrent(){
 function pad2(n){return String(n).padStart(2,'0');}
 function formatEntryLine(e){
   var parts=[];
-  if(e.weight) parts.push(e.weight+'kg');
+  if(e.weight) parts.push(e.weight+(e.unit||'kg'));
   if(e.reps) parts.push('×'+e.reps);
   if(e.duration) parts.push(e.duration+'秒');
   if(e.rir) parts.push('RIR '+e.rir);
   if(e.e1rm) parts.push('e1RM '+e.e1rm);
   var body=parts.length?parts.join('｜'):'未填写';
+  if(e.segment) return '  第'+(e.round||'-')+'轮 '+e.segment+(e.segmentLabel?(' '+e.segmentLabel):'')+(e.segmentName?('｜'+e.segmentName):'')+'：'+body;
   return '  第'+(e.set||'-')+'组：'+body;
 }
 function buildBriefText(log){
