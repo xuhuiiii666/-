@@ -48,6 +48,31 @@ function normalizeSetRepText(s){
     .replace(/(\d+)\s*组\s*[xX]\s*([\d\-~至]+)\s*次呼吸/g,'$1x$2')
     .replace(/休\s*([\d\-]+)\s*秒/g,'休$1秒');
 }
+function isStandaloneTrainingSectionMarker(line){
+  return /^【\s*(?:功能模块|功能\/热身|热身|主项|主辅助|正式训练|主训练|功能循环|功能训练|训练循环|辅助|康复\/辅助|康复辅助|核心|有氧|执行|可选恢复|恢复|休息)\s*】$/.test(String(line||'').trim());
+}
+function stripStandaloneTrainingSectionMarkers(text){
+  return String(text||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').filter(function(line){
+    return !isStandaloneTrainingSectionMarker(line);
+  }).join('\n').trim();
+}
+function normalizeImportedDateCell(value){
+  if(value && typeof value.getTime==='function' && !isNaN(value.getTime())){
+    return value.getFullYear()+'-'+('0'+(value.getMonth()+1)).slice(-2)+'-'+('0'+value.getDate()).slice(-2);
+  }
+  var raw=String(value==null?'':value).trim();
+  if(/^\d{5}(?:\.\d+)?$/.test(raw)){
+    var serial=Number(raw);
+    if(serial>=20000 && serial<=80000){
+      return new Date(Date.UTC(1899,11,30)+Math.floor(serial)*86400000).toISOString().slice(0,10);
+    }
+  }
+  return raw;
+}
+function parseImportedWeek(value){
+  var m=String(value==null?'':value).match(/(\d+)/);
+  return m ? (parseInt(m[1],10)||'') : '';
+}
 function firstNumberRange(s){
   var m=String(s||'').match(/(\d+(?:\.\d+)?)(?:\s*[–\-~至]\s*(\d+(?:\.\d+)?))?/);
   if(!m) return '';
@@ -239,6 +264,7 @@ function importFormatA(rows, headerRow){
   var h=rows[headerRow];
   var ixWeek=headerIndex(h,['周次']), ixDate=headerIndex(h,['日期']), ixDay=headerIndex(h,['星期','周内日']);
   var ixStage=headerIndex(h,['阶段']), ixTheme=headerIndex(h,['训练主题','主题']), ixWarm=headerIndex(h,['热身模板']);
+  var ixWarmContent=headerIndex(h,['热身/功能退阶','热身／功能退阶','热身内容','功能退阶']);
   var ixContent=headerIndex(h,['训练内容','今日内容']), ixRest=headerIndex(h,['组间休息','休息']);
   var plan=[];
   for(var r=headerRow+1;r<rows.length;r++){
@@ -246,15 +272,19 @@ function importFormatA(rows, headerRow){
     var content=cell(row,ixContent);
     var theme=cell(row,ixTheme);
     if(!content && !theme) continue;
+    var warmupContent=ixWarmContent>=0 ? normalizeSetRepText(stripStandaloneTrainingSectionMarkers(cell(row,ixWarmContent))) : '';
+    var cleanedContent=normalizeSetRepText(stripStandaloneTrainingSectionMarkers(content));
+    var plannedDate=normalizeImportedDateCell(cell(row,ixDate));
     plan.push({
-      '周次': parseInt(cell(row,ixWeek),10)||'',
-      '日期': cell(row,ixDate)||'',
-      'plannedDate': cell(row,ixDate)||'',
+      '周次': parseImportedWeek(cell(row,ixWeek)),
+      '日期': plannedDate,
+      'plannedDate': plannedDate,
       '星期': cell(row,ixDay)||'',
       '阶段': cell(row,ixStage)||'导入计划',
       '训练主题': theme||('导入训练 '+(plan.length+1)),
-      '热身模板': cell(row,ixWarm)||'导入热身',
-      '训练内容（组×次数/余力）': normalizeSetRepText(content),
+      '热身模板': cell(row,ixWarm)||(warmupContent?'逐日导入热身':'导入热身'),
+      '导入热身内容': warmupContent,
+      '训练内容（组×次数/余力）': cleanedContent,
       '组间休息/规则': cell(row,ixRest)||'主项3分钟；大辅助90–120秒；小辅助45–90秒'
     });
   }

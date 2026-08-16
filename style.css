@@ -1118,6 +1118,21 @@ body{
   .anchorCalibrationBody [data-anchor-result]{font-size:11px}
 }
 
+/* 手机调用热身模板：弹窗停在底部导航上方，最后一个按钮也能滚动到可点区。 */
+@media(max-width:720px){
+  #templatePickerModal.modalMask{
+    padding:8px 8px calc(76px + env(safe-area-inset-bottom));
+  }
+  #templatePickerModal .modalPanel{
+    max-height:calc(100dvh - 96px - env(safe-area-inset-bottom));
+    scroll-padding-bottom:24px;
+    overscroll-behavior:contain;
+  }
+  #templatePickerModal #templateList{
+    padding-bottom:calc(18px + env(safe-area-inset-bottom));
+  }
+}
+
 /* ===== 递减组 / 超级组：每轮内分段执行 ===== */
 .compoundBadge{
   display:inline-block;
