@@ -21,6 +21,11 @@
 - parser.js：训练内容解析
 - storage.js：localStorage、备份导入导出、数据迁移
 - templates.js：训练动作库与热身动作库
+- prescription.js：动作与组处方、setType、目标范围和重量调整
+- history.js：训练日志派生的动作历史、上次同名和完整历史展示
+
+## 结构化导入协议
+`IMPORT_FORMAT_V1.md` 是 Structured Import v1 的唯一规范。存在 `训练器数据_v1` 时必须优先按结构化协议校验；结构化校验失败必须终止，不得 fallback 到旧格式或内置计划。
 
 ## 导入兼容目标
 必须兼容：

@@ -11,26 +11,67 @@
 - `parser.js`
 - `storage.js`
 - `templates.js`
+- `prescription.js`
+- `history.js`
+- `STATE_ARCHITECTURE.md`
+- `IMPORT_FORMAT_V1.md`
+- `AGENTS.md`
+- `package.json`
+- `tests/`
 
 ## 本地存档不会丢
 
 训练记录、导入计划、动作库、热身库都保存在浏览器 `localStorage` 里。
 
-这版代码保留了原来的存储键：
+这版使用一个稳定的根存储键：
 
 ```js
-const KEY='xuhui_training_v2_dailygrid';
+training-tracker-state
 ```
+
+如果浏览器仍使用更早的旧键，首次打开新版时会自动读取：
+
+- `xuhui_training_v2_dailygrid`
+- `xuhui_training_v2_dailygrid_importedPlan`
+- `xuhui_training_v2_dailygrid_importedWarmups`
+
+迁移成功后，计划、训练日志、重量、模板、日期和设置都会进入新根状态。旧键随后清理，避免多个版本各写一套状态。
+
+已经使用 Schema v5 根状态的设备会先在本机自动建立：
+
+```js
+training-tracker-state-pre-v6-backup
+```
+
+然后在状态副本上执行 v5 → v6 增量迁移。Program、当前训练日、草稿重量、训练日志、动作历史、模板和 RM 记录全部通过完整性校验后，才会写回正式根键。迁移失败不会覆盖原状态。参数设置中会出现弱化的“恢复升级前本地数据”入口，并要求二次确认。
 
 只要你：
 
 1. 继续用同一个浏览器打开同一个 GitHub Pages 地址；
 2. 不清空浏览器网站数据；
-3. 不改 `app.js` 里的 `KEY`；
+3. 不手动修改 `training-tracker-state`；
 
-原来的本地存档就会继续读取。
+原来的本地存档就会自动迁移并继续读取。`actualDates` / `actualDate` 仍用于锁定实际训练日期；旧日志不会删除。
 
-这版新增了 `actualDates` / `actualDate` 字段，用来锁定“实际训练发生日期”。旧日志只有 `date` 字段时，会自动补一份 `actualDate`，不会删除旧字段。
+## 训练计划现在彼此独立
+
+Excel 默认会“导入为新的训练计划”，不会覆盖当前计划。需要覆盖时，必须单独点击“替换当前计划”并确认。
+
+在“日历/顺延”页可以切换不同训练计划。每个计划各自保存当前训练、草稿、日期和训练日志。
+
+## 回归测试
+
+项目包含 38 项状态、无损迁移、旧格式导入、Structured v1、组处方和动作历史回归测试，其中 16 项专门覆盖 v5 → v6 升级：
+
+```bash
+npm test
+```
+
+## 新版结构化计划
+
+导入页新增“下载标准计划模板”。生成的 `训练器标准训练计划_v1.xlsx` 包含固定协议和特殊组示例。完整格式以 `IMPORT_FORMAT_V1.md` 为准。
+
+Structured v1 校验失败时，当前训练计划完全不变，也不会回退到任何示例计划。原有徐晖版、肖悦版、手机查看版、一日一格和逐日执行 Excel 仍继续兼容。
 
 ## 上传前建议
 
@@ -41,11 +82,11 @@ const KEY='xuhui_training_v2_dailygrid';
 浏览器可能缓存了旧文件。可以刷新几次，或在地址后加：
 
 ```text
-?v=20260520
+?v=20260829
 ```
 
 例如：
 
 ```text
-https://xuhuiiii666.github.io/-/?v=20260520
+https://xuhuiiii666.github.io/-/?v=20260829
 ```
