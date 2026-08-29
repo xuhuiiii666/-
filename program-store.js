@@ -95,19 +95,33 @@
     });
     return map;
   }
+  function supersetRuleMap(report){
+    var map={};
+    asArray(report&&report.supersetRows).forEach(function(row){
+      var workoutId=text(row.workoutId);
+      map[workoutId]=map[workoutId]||[];
+      map[workoutId].push({
+        supersetId:text(row['超级组ID']),groupName:text(row['超级组名称']),mode:text(row.mode),
+        transitionMinSec:numberOrNull(row['过渡下限秒']),transitionMaxSec:numberOrNull(row['过渡上限秒']),
+        roundRestMinSec:numberOrNull(row['轮间休息下限秒']),roundRestMaxSec:numberOrNull(row['轮间休息上限秒']),
+        note:text(row['超级组备注'])
+      });
+    });
+    return map;
+  }
   function importedDate(value){
     if(typeof global.normalizeImportedDateCell==='function') return global.normalizeImportedDateCell(value);
     return text(value);
   }
   function buildStructuredProgramDays(report){
     if(!report||asArray(report.errors).length) throw new Error('Structured Import v1 必须先通过校验。');
-    var setMap=setPrescriptionMap(report),workoutMap={};
+    var setMap=setPrescriptionMap(report),supersetMap=supersetRuleMap(report),workoutMap={};
     asArray(report.dataRows).forEach(function(row){
       var workoutId=text(row.workoutId),exerciseId=text(row.exerciseId),section=text(row.section);
       var workout=workoutMap[workoutId];
       if(!workout){
         var plannedDate=importedDate(row.plannedDate);
-        workout=workoutMap[workoutId]={workoutId:workoutId,source:'structured-v1',order:Number(row['顺序']),plannedDate:plannedDate,date:plannedDate,title:text(row['训练主题']),programName:text(row.programName),exercises:[]};
+        workout=workoutMap[workoutId]={workoutId:workoutId,source:'structured-v1',order:Number(row['顺序']),plannedDate:plannedDate,date:plannedDate,title:text(row['训练主题']),programName:text(row.programName),targetDurationMin:numberOrNull(row.targetDurationMin),supersetRules:copy(supersetMap[workoutId]||[]),exercises:[]};
         workout['训练主题']=workout.title;
         workout['训练内容（组×次数/余力）']='';
         workout['导入热身内容']='';
@@ -122,7 +136,7 @@
         unit:text(row['单位'])||'kg'
       };
       var exercise={
-        exerciseId:exerciseId,source:'structured-v1',section:section,
+        exerciseId:exerciseId,source:'structured-v1',section:section,trainingRole:text(row.trainingRole),
         isWarmup:global.structuredBoolean(row['是否热身']),order:Number(row['动作顺序']),
         name:text(row['动作名称']),trackingName:text(row['动作名称']),originalName:text(row['动作名称']),
         setCount:Number(row['组数']),duration:duration===null?'':duration,note:text(row['动作备注']),

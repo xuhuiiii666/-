@@ -57,6 +57,7 @@ export function loadImporter(storage=new MemoryStorage()){
   loadScript(context,'prescription.js');
   loadScript(context,'parser.js');
   loadScript(context,'import-validator.js');
+  loadScript(context,'plan-compiler.js');
   loadScript(context,'importer.js');
   loadScript(context,'program-store.js');
   return context;
@@ -70,6 +71,7 @@ export function loadTrainingModules(storage=new MemoryStorage()){
   loadScript(context,'parser.js');
   loadScript(context,'history.js');
   loadScript(context,'import-validator.js');
+  loadScript(context,'plan-compiler.js');
   loadScript(context,'importer.js');
   loadScript(context,'program-store.js');
   return context;

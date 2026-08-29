@@ -112,7 +112,14 @@ Structured Import v1 的固定协议见 `IMPORT_FORMAT_V1.md`。只要存在 `�
 - `history.js`：从 workoutLogs 重建 exerciseHistory、上次同名、完整历史弹窗。
 - `importer.js`：Workbook 读取、Structured/Legacy 分流、旧格式兼容和导入预检查。
 - `import-validator.js`：Structured Import v1 固定列、枚举、ID、引用和范围校验；不修改状态。
+- `plan-compiler.js`：把训练规划层已确定的内容转为 Structured workbook data 并生成技术 ID；不做训练学判断。
 - `program-store.js`：Program / Workout / Exercise 创建、结构化行转换和计划切换。
 - `parser.js`：旧格式文本动作解析，保持兼容。
 - `storage.js`：唯一根状态、Schema 迁移、备份导入导出。
 - `app.js`：页面控制与训练执行协调；倒计时实现保持原样。
+
+训练计划接口文档分层：
+
+- `TRAINING_PLAN_HANDOFF.md`：训练规划 AI 应提供的内容。
+- `IMPORT_FORMAT_V1.md`：Excel 与 importer 的机器接口。
+- `IMPORT_CHANGELOG.md`：接口变化历史。

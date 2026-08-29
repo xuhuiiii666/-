@@ -4,10 +4,15 @@
 
   var DATA_SHEET='训练器数据_v1';
   var SET_SHEET='组计划_v1';
-  var DATA_HEADERS=['schemaVersion','programName','workoutId','顺序','plannedDate','训练主题','section','exerciseId','动作顺序','动作名称','组数','次数下限','次数上限','RIR下限','RIR上限','建议重量','单位','休息下限秒','休息上限秒','动作秒数','动作备注','超级组ID','是否热身'];
+  var SUPERSET_SHEET='超级组规则_v1';
+  var DATA_HEADERS=['schemaVersion','programName','workoutId','顺序','plannedDate','训练主题','targetDurationMin','section','trainingRole','exerciseId','动作顺序','动作名称','组数','次数下限','次数上限','RIR下限','RIR上限','建议重量','单位','休息下限秒','休息上限秒','动作秒数','动作备注','超级组ID','是否热身'];
+  var DATA_REQUIRED_HEADERS=['schemaVersion','programName','workoutId','顺序','plannedDate','训练主题','section','exerciseId','动作顺序','动作名称','组数','次数下限','次数上限','RIR下限','RIR上限','建议重量','单位','休息下限秒','休息上限秒','动作秒数','动作备注','超级组ID','是否热身'];
   var SET_HEADERS=['workoutId','exerciseId','组号','setType','次数下限','次数上限','RIR下限','RIR上限','休息下限秒','休息上限秒','重量调整类型','重量调整值','技术提示'];
+  var SUPERSET_HEADERS=['workoutId','超级组ID','超级组名称','mode','过渡下限秒','过渡上限秒','轮间休息下限秒','轮间休息上限秒','超级组备注'];
   var SECTIONS=['功能模块','主项','主辅助','辅助','核心','康复/辅助','有氧','恢复','休息'];
+  var TRAINING_ROLES=['pattern','hypertrophy','isolation','skill-acquisition','skill-retention'];
   var SET_TYPES=['working','technique','warmup','top','backoff','dropset'];
+  var SUPERSET_MODES=['alternating'];
   var ID_PATTERN=/^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 
   function text(value){return String(value===undefined||value===null?'':value).trim();}
@@ -71,15 +76,17 @@
     fields.forEach(function(field){if(text(row[field])==='') report.errors.push(prefix+'缺少 '+field);});
   }
   function validateStructuredWorkbook(workbook,readRows){
-    var report={format:'Structured Import v1',errors:[],warnings:[],checks:[],stats:{workouts:0,exercises:0,sets:0,specialSets:0},dataRows:[],setRows:[]};
+    var report={format:'Structured Import v1',errors:[],warnings:[],checks:[],stats:{workouts:0,exercises:0,sets:0,specialSets:0,supersetRules:0},dataRows:[],setRows:[],supersetRows:[]};
     var sheetNames=workbook&&Array.isArray(workbook.SheetNames)?workbook.SheetNames:[];
     if(sheetNames.indexOf(DATA_SHEET)<0){report.errors.push('缺少必需工作表「'+DATA_SHEET+'」');return report;}
     readRows=typeof readRows==='function'?readRows:global.rowsFromSheet;
     if(typeof readRows!=='function'){report.errors.push('Structured Import v1 无法读取工作表');return report;}
 
     var dataRows=readRows(workbook.Sheets&&workbook.Sheets[DATA_SHEET]);
-    var missing=missingHeaders(dataRows,DATA_HEADERS);
+    var missing=missingHeaders(dataRows,DATA_REQUIRED_HEADERS);
     if(missing.length){report.errors.push('「'+DATA_SHEET+'」缺少列：'+missing.join('、'));return report;}
+    var dataColumns=headerMap(dataRows&&dataRows[0]||[]);
+    var hasTrainingRoleColumn=dataColumns.trainingRole!==undefined;
     report.dataRows=rowsToObjects(dataRows);
     if(!report.dataRows.length) report.errors.push('「'+DATA_SHEET+'」没有动作数据');
 
@@ -102,11 +109,16 @@
       if(workoutId&&!ID_PATTERN.test(workoutId)) report.errors.push(prefix+'workoutId 不合法，只允许字母开头的字母、数字、下划线和连字符，最长 64 位');
       if(exerciseId&&!ID_PATTERN.test(exerciseId)) report.errors.push(prefix+'exerciseId 不合法，只允许字母开头的字母、数字、下划线和连字符，最长 64 位');
       if(SECTIONS.indexOf(section)<0) report.errors.push(prefix+'section 不受支持：'+section);
+      var trainingRole=text(row.trainingRole);
+      if(hasTrainingRoleColumn&&!trainingRole) report.errors.push(prefix+'缺少 trainingRole');
+      if(trainingRole&&TRAINING_ROLES.indexOf(trainingRole)<0) report.errors.push(prefix+'trainingRole 只能是 '+TRAINING_ROLES.join('/'));
       if(sectionMarker(row['动作名称'])) report.errors.push(prefix+'动作名称不能是 section 标题或 section 标记');
       if(!positiveInteger(row['顺序'])) report.errors.push(prefix+'顺序必须是正整数');
       if(!positiveInteger(row['动作顺序'])) report.errors.push(prefix+'动作顺序必须是正整数');
       if(!positiveInteger(row['组数'])) report.errors.push(prefix+'组数必须是正整数');
       if(!validIsoDate(row.plannedDate)) report.errors.push(prefix+'plannedDate 必须为 YYYY-MM-DD 或留空');
+      var targetDuration=numberOrNull(row.targetDurationMin);
+      if(text(row.targetDurationMin)!==''&&(targetDuration===null||targetDuration<=0)) report.errors.push(prefix+'targetDurationMin 必须是正数或留空');
 
       validateRange(report,row,'次数下限','次数上限','次数',{min:0},prefix);
       validateRange(report,row,'RIR下限','RIR上限','RIR',{min:0,max:10},prefix);
@@ -122,13 +134,13 @@
       if(!booleanValue.valid) report.errors.push(prefix+'是否热身只能是 是/否、true/false 或 1/0');
 
       var workout=workouts[workoutId];
-      var metadata={order:text(row['顺序']),plannedDate:text(row.plannedDate),title:text(row['训练主题'])};
+      var metadata={order:text(row['顺序']),plannedDate:text(row.plannedDate),title:text(row['训练主题']),targetDurationMin:text(row.targetDurationMin)};
       if(!workout){
         workouts[workoutId]=metadata;
         if(workoutOrders[metadata.order]&&workoutOrders[metadata.order]!==workoutId) report.errors.push(prefix+'训练顺序与 workoutId '+workoutOrders[metadata.order]+' 重复');
         workoutOrders[metadata.order]=workoutId;
-      }else if(workout.order!==metadata.order||workout.plannedDate!==metadata.plannedDate||workout.title!==metadata.title){
-        report.errors.push(prefix+'同一 workoutId 的顺序、plannedDate 和训练主题必须一致');
+      }else if(workout.order!==metadata.order||workout.plannedDate!==metadata.plannedDate||workout.title!==metadata.title||workout.targetDurationMin!==metadata.targetDurationMin){
+        report.errors.push(prefix+'同一 workoutId 的顺序、plannedDate、训练主题和 targetDurationMin 必须一致');
       }
 
       var key=workoutId+'::'+exerciseId;
@@ -186,24 +198,55 @@
       if(adjustmentText&&adjustment===null) report.errors.push(prefix+'重量调整值必须是数字');
     });
 
+    if(sheetNames.indexOf(SUPERSET_SHEET)>=0){
+      var supersetRows=readRows(workbook.Sheets&&workbook.Sheets[SUPERSET_SHEET]);
+      var supersetMissing=missingHeaders(supersetRows,SUPERSET_HEADERS);
+      if(supersetMissing.length) report.errors.push('「'+SUPERSET_SHEET+'」缺少列：'+supersetMissing.join('、'));
+      else report.supersetRows=rowsToObjects(supersetRows);
+    }else if(Object.keys(supersetMembers).length){
+      report.warnings.push('未提供「'+SUPERSET_SHEET+'」，超级组按旧 Structured v1 规则仅保留动作分组关系');
+    }
+
+    var seenSupersetRules={};
+    report.supersetRows.forEach(function(row){
+      var prefix='超级组规则第 '+row._row+' 行 ';
+      addRequiredErrors(report,row,['workoutId','超级组ID','mode','过渡下限秒','过渡上限秒','轮间休息下限秒','轮间休息上限秒'],prefix);
+      var workoutId=text(row.workoutId),supersetId=text(row['超级组ID']),key=workoutId+'::'+supersetId;
+      if(seenSupersetRules[key]) report.errors.push(prefix+'同一 workoutId + 超级组ID 规则重复');
+      seenSupersetRules[key]=true;
+      if(!supersetMembers[key]) report.errors.push(prefix+'找不到主表中的超级组成员 '+key);
+      var mode=text(row.mode);
+      if(SUPERSET_MODES.indexOf(mode)<0) report.errors.push(prefix+'mode 第一版只允许 alternating');
+      validateRange(report,row,'过渡下限秒','过渡上限秒','动作间过渡秒数',{min:0},prefix);
+      validateRange(report,row,'轮间休息下限秒','轮间休息上限秒','轮间休息秒数',{min:0},prefix);
+    });
+    if(sheetNames.indexOf(SUPERSET_SHEET)>=0){
+      Object.keys(supersetMembers).forEach(function(key){if(!seenSupersetRules[key]) report.errors.push('超级组 '+key+' 缺少「'+SUPERSET_SHEET+'」规则');});
+    }
+
     report.stats.workouts=Object.keys(workouts).filter(Boolean).length;
     report.stats.exercises=report.dataRows.length;
     report.stats.specialSets=report.setRows.length;
+    report.stats.supersetRules=report.supersetRows.length;
     if(!report.errors.length){
       report.checks.push('固定工作表与列校验通过');
       report.checks.push('Program、Workout、Exercise 稳定 ID 校验通过');
       report.checks.push('section、布尔值、数值范围和时间字段校验通过');
       report.checks.push('特殊组引用、组号和 setType 校验通过');
-      report.checks.push('超级组关联校验通过');
+      report.checks.push('超级组关联与 alternating 规则校验通过');
     }
     return report;
   }
 
   global.STRUCTURED_DATA_SHEET=DATA_SHEET;
   global.STRUCTURED_SET_SHEET=SET_SHEET;
+  global.STRUCTURED_SUPERSET_SHEET=SUPERSET_SHEET;
   global.STRUCTURED_DATA_HEADERS=DATA_HEADERS.slice();
+  global.STRUCTURED_DATA_REQUIRED_HEADERS=DATA_REQUIRED_HEADERS.slice();
   global.STRUCTURED_SET_HEADERS=SET_HEADERS.slice();
+  global.STRUCTURED_SUPERSET_HEADERS=SUPERSET_HEADERS.slice();
   global.STRUCTURED_SECTIONS=SECTIONS.slice();
+  global.STRUCTURED_TRAINING_ROLES=TRAINING_ROLES.slice();
   global.STRUCTURED_ID_PATTERN=ID_PATTERN;
   global.structuredHeaderMap=headerMap;
   global.structuredRowsToObjects=rowsToObjects;

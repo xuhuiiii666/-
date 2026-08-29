@@ -9,6 +9,7 @@
 - `app.js`
 - `importer.js`
 - `import-validator.js`
+- `plan-compiler.js`
 - `parser.js`
 - `storage.js`
 - `program-store.js`
@@ -17,6 +18,8 @@
 - `history.js`
 - `STATE_ARCHITECTURE.md`
 - `IMPORT_FORMAT_V1.md`
+- `TRAINING_PLAN_HANDOFF.md`
+- `IMPORT_CHANGELOG.md`
 - `AGENTS.md`
 - `package.json`
 - `tests/`
@@ -63,7 +66,7 @@ Excel 默认会“导入为新的训练计划”，不会覆盖当前计划。�
 
 ## 回归测试
 
-项目包含 58 项状态、无损迁移、旧格式导入、Structured v1、组处方和动作历史回归测试，其中 16 项专门覆盖 v5 → v6 升级，20 项覆盖 Structured Import v1 固定协议：
+项目包含 75 项状态、无损迁移、旧格式导入、Structured v1、组处方、动作历史和计划编译回归测试，其中 16 项专门覆盖 v5 → v6 升级，20 项覆盖 Structured Import v1 固定协议，17 项覆盖训练内容交接编译：
 
 ```bash
 npm test
@@ -71,7 +74,7 @@ npm test
 
 ## 新版结构化计划
 
-训练器不生成训练计划或 Excel 模板。外部工具必须按 `IMPORT_FORMAT_V1.md` 生成固定工作表和字段；训练器只负责严格校验并转换成标准 Program。
+训练器不设计训练计划，也不在页面里生成 Excel。训练规划 AI 按 `TRAINING_PLAN_HANDOFF.md` 提供训练内容，Codex 使用 `plan-compiler.js` 转换为 `IMPORT_FORMAT_V1.md` 规定的 workbook data，再生成官方 Excel 并完成严格 validation。
 
 Structured v1 校验失败时，当前训练计划完全不变，也不会回退到任何示例计划。原有徐晖版、肖悦版、手机查看版、一日一格和逐日执行 Excel 仍继续兼容。
 

@@ -12,6 +12,8 @@
 6. 每次修改后不要删功能：今日训练、训练队列、计时器、动作库、热身库、RM换算、备份导入导出都要保留。
 7. 日期逻辑以实际训练发生日期为准：`actualDate > scheduledDate > plannedDate`。训练日志和总存档必须优先使用 `actualDate`，计划原始日期只能作为参考。
 8. 动作模板库和热身动作库必须去重；当前动作已在库里时显示“已在动作库/已在热身库”，不要继续显示“保存此动作”。
+9. 训练规划内容与 Excel 技术接口严格分层：训练规划 AI 提供内容，`plan-compiler.js` 只转换，不得根据动作名称推断训练规则。
+10. 涉及训练计划接口变化时，必须同步检查 `IMPORT_FORMAT_V1.md`、`TRAINING_PLAN_HANDOFF.md`、官方 Excel 母版和 `IMPORT_CHANGELOG.md`。
 
 ## 文件职责
 - index.html：页面结构入口
@@ -19,15 +21,18 @@
 - app.js：主交互、页面切换、训练执行
 - importer.js：Workbook 读取、Structured/Legacy 格式识别和导入预览
 - import-validator.js：Structured Import v1 严格校验
+- plan-compiler.js：训练内容结构稿转 Structured workbook data，自动生成技术 ID
 - parser.js：训练内容解析
 - storage.js：localStorage、备份导入导出、数据迁移
 - program-store.js：Program / Workout / Exercise 创建和计划切换
 - templates.js：训练动作库与热身动作库
 - prescription.js：动作与组处方、setType、目标范围和重量调整
 - history.js：训练日志派生的动作历史、上次同名和完整历史展示
+- TRAINING_PLAN_HANDOFF.md：训练规划 AI 与 Codex 的内容交接协议
+- IMPORT_CHANGELOG.md：训练计划导入接口变更历史
 
 ## 结构化导入协议
-`IMPORT_FORMAT_V1.md` 是 Structured Import v1 的唯一规范。存在 `训练器数据_v1` 时必须优先按结构化协议校验；结构化校验失败必须终止，不得 fallback 到旧格式或内置计划。
+`IMPORT_FORMAT_V1.md` 是 Excel 与 importer 的机器协议；`TRAINING_PLAN_HANDOFF.md` 是训练规划 AI 与 Codex 的内容协议。存在 `训练器数据_v1` 时必须优先按结构化协议校验；结构化校验失败必须终止，不得 fallback 到旧格式或内置计划。
 
 ## 导入兼容目标
 必须兼容：
