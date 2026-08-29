@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>逐日训练器｜12周计划</title>
-<link rel="stylesheet" href="style.css?v=20260829-v6safe"/>
+<link rel="stylesheet" href="style.css?v=20260829-storage-rescue-1"/>
 </head>
 <body>
 <header class="appHeader">
@@ -183,6 +183,17 @@
       </div>
       <p class="small">如果前几天没练，不需要改日期；训练器以“未完成的下一练”为准，完成一次才推进一次。想强行换成推/拉/腿，可以在今日训练按上一练/下一练，或改当前训练序号。</p>
       <button class="primary" onclick="saveSettings()">保存设置</button>
+      <div class="maintenanceRecovery">
+        <div id="storageDiagnostic" class="small">正在读取本地存储诊断，不会修改任何数据。</div>
+        <div class="row" style="margin-top:8px">
+          <button type="button" onclick="exportRawStateFromSettings()">导出原始本地存档</button>
+        </div>
+        <div id="preV6BackupActions" class="row hidden" style="margin-top:8px">
+          <button type="button" onclick="exportPreV6FromSettings()">导出升级前备份</button>
+          <button type="button" class="bad" onclick="deletePreV6FromSettings()">删除本地升级快照</button>
+        </div>
+        <div id="legacyStorageActions" class="row hidden" style="margin-top:8px"></div>
+      </div>
       <div id="preV6Recovery" class="maintenanceRecovery hidden">
         <div class="small">本机保留了升级前安全快照。仅在升级后数据异常时使用。</div>
         <button type="button" onclick="restoreUpgradeBackupFromSettings()">恢复升级前本地数据</button>
@@ -378,14 +389,14 @@
 </div>
 <div id="timerConfirmMask" class="timerConfirmMask"><div class="timerConfirmBox"><h3 id="timerConfirmTitle">倒计时结束</h3><p id="timerConfirmBody">可以开始下一步。</p><button type="button" onclick="closeTimerConfirm()">确认</button></div></div>
 <script src="prescription.js?v=20260829-structured-v1"></script>
-<script src="storage.js?v=20260829-structured-v1"></script>
+<script src="storage.js?v=20260829-storage-rescue-1"></script>
 <script src="templates.js?v=20260829-structured-v1"></script>
-<script src="parser.js?v=20260729-compound"></script>
+<script src="parser.js?v=20260829-storage-rescue-1"></script>
 <script src="history.js?v=20260829-structured-v1"></script>
 <script src="import-validator.js?v=20260829-structured-v1"></script>
 <script src="plan-compiler.js?v=20260829-handoff-v1"></script>
-<script src="importer.js?v=20260829-structured-v1"></script>
-<script src="program-store.js?v=20260829-structured-v1"></script>
-<script src="app.js?v=20260829-structured-v1"></script>
+<script src="importer.js?v=20260829-storage-rescue-1"></script>
+<script src="program-store.js?v=20260829-storage-rescue-1"></script>
+<script src="app.js?v=20260829-storage-rescue-1"></script>
 </body>
 </html>

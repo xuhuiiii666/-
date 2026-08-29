@@ -77,5 +77,6 @@ test('10. 旧 localStorage 迁移后日志、重量和序号状态不丢',()=>{
   assert.equal(app.getActiveProgram().completed[firstWorkoutId],true);
   assert.ok(app.getActiveProgram().currentWorkoutDrafts[firstWorkoutId]);
   assert.equal(app.getActiveProgram().customWarmups['workout_'+firstWorkoutId],'旧热身');
-  assert.deepEqual(storage.keys(),['training-tracker-state']);
+  assert.deepEqual(storage.keys().sort(),['xuhui_training_v2_dailygrid','xuhui_training_v2_dailygrid_importedPlan'].sort());
+  assert.equal(app.inspectTrainingStorage().legacy.xuhui_training_v2_dailygrid.exists,true);
 });

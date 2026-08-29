@@ -11,10 +11,9 @@
     if(text(value)==='') return null;
     var number=Number(value);return isFinite(number)?number:null;
   }
-  function bindAndSave(root){
-    if(typeof global.bindTrainingRuntime!=='function') throw new Error('训练器运行状态尚未初始化。');
-    global.bindTrainingRuntime(root);
-    global.saveState();
+  function commitCandidate(root){
+    if(typeof global.saveRootCandidate!=='function') throw new Error('训练器存储边界尚未初始化。');
+    return global.saveRootCandidate(root);
   }
 
   function createProgramFromPlan(days,options){
@@ -22,32 +21,33 @@
     return global.normalizeProgram({programId:options.programId,name:options.name||options.sourceFileName||'导入训练计划',source:options.source||'imported',sourceFileName:options.sourceFileName||'',days:copy(days||[])},options);
   }
   function addProgram(program,activate){
-    var root=global.trainingTrackerState;
-    var profile=global.getActiveProfile(root);
-    if(!root||!profile) throw new Error('当前训练档案不存在。');
+    var currentRoot=global.trainingTrackerState;
+    var root=copy(currentRoot),profile=global.getActiveProfile(root);
+    if(!currentRoot||!profile) throw new Error('当前训练档案不存在。');
     var next=global.normalizeProgram(program);
     profile.programs[next.programId]=next;
     if(activate!==false) root.activeProgramId=next.programId;
-    bindAndSave(root);
+    commitCandidate(root);
     return next;
   }
   function replaceActiveProgram(program){
-    var root=global.trainingTrackerState;
+    var currentRoot=global.trainingTrackerState;
+    var root=copy(currentRoot);
     var profile=global.getActiveProfile(root);
-    if(!root||!profile||!root.activeProgramId) throw new Error('当前训练计划不存在。');
+    if(!currentRoot||!profile||!root.activeProgramId) throw new Error('当前训练计划不存在。');
     var currentId=root.activeProgramId;
     var next=global.normalizeProgram(Object.assign({},program,{programId:currentId}));
     profile.programs[currentId]=next;
-    bindAndSave(root);
+    commitCandidate(root);
     return next;
   }
   function activateProgram(programId){
-    var root=global.trainingTrackerState;
+    var currentRoot=global.trainingTrackerState;
+    var root=copy(currentRoot);
     var profile=global.getActiveProfile(root);
     if(!profile||!profile.programs[programId]) throw new Error('训练计划不存在。');
-    if(typeof global.syncProgramToRoot==='function') global.syncProgramToRoot(global.getActiveProgram(root));
     root.activeProgramId=programId;
-    bindAndSave(root);
+    commitCandidate(root);
     return global.getActiveProgram(root);
   }
   function createCustomWorkout(title,options){

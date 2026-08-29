@@ -4,9 +4,9 @@ var runtimeState=initializeTrainingTracker(BUILTIN_PLAN,BUILTIN_WARMUPS);
 var state=runtimeState.program;
 var PLAN=runtimeState.plan;
 var WARMUPS=runtimeState.warmups;
-try{ if(ensureDateMigration()) saveState(); }catch(e){}
+try{ if(ensureDateMigration()) state.dateMigrationPending=true; }catch(e){}
 try{ state.logs=getBackupLogsFromState(state); state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs); }catch(e){}
-try{ if(dedupeTemplateLibraries()) saveState(); }catch(e){}
+try{ if(dedupeTemplateLibraries()) state.templateDedupePending=true; }catch(e){}
 let activeSet = null, timerLeft=180, timerBase=180, timerId=null;
 let rowTimers = {}; // 每一组都能独立显示自己的倒计时；实际同时只跑一个，避免训练时多个铃同时响。
 let activeTimerContext = null; // 用真实结束时间校准，切出手机后回来不丢时间。
@@ -164,8 +164,10 @@ function exerciseEntityForRender(entity,index){
   };
 }
 function parseExercises(text,workout){
-  if(workout&&Array.isArray(workout.exercises)&&workout.exercises.length){
-    return workout.exercises.filter(function(exercise){return !exercise.isWarmup&&exercise.section!=='功能模块';}).map(exerciseEntityForRender);
+  var existingExercises=workout&&Array.isArray(workout.exercises)?workout.exercises:[];
+  var storedMainExercises=existingExercises.filter(function(exercise){return !exercise.isWarmup&&exercise.section!=='功能模块';});
+  if(storedMainExercises.length){
+    return storedMainExercises.map(exerciseEntityForRender);
   }
   var parsedList=(text||'').split('\n').filter(function(x){return x.trim()&&!x.includes('【本周提示】');}).map(function(line,i){
     if(typeof parseExerciseLine === 'function'){
@@ -223,11 +225,12 @@ function parseExercises(text,workout){
     return {name:name,line:raw,sets:sets,reps:reps,rir:rir,isMain:i===0,index:i};
   });
   if(workout&&parsedList.length){
-    workout.exercises=parsedList.map(function(ex,index){
+    var parsedExercises=parsedList.map(function(ex,index){
       var count=Number(ex.sets)||1;
       var entity=normalizeExerciseEntity({exerciseId:createStableId('exercise'),source:'plan',name:ex.name,trackingName:ex.name,originalName:ex.name,line:ex.line,setCount:count,reps:ex.reps,rir:ex.rir,duration:ex.duration,suggestedWeight:ex.suggestedWeight,rest:ex.rest,sets:Array.from({length:count},function(_,setIndex){return {setId:createStableId('set'),setNo:setIndex+1,reps:ex.reps||'',rir:ex.rir||'',duration:ex.duration||'',rest:Number(ex.rest&&ex.rest.def)||90};})},index);
       return entity;
     });
+    workout.exercises=existingExercises.filter(function(exercise){return exercise.isWarmup||exercise.section==='功能模块';}).concat(parsedExercises);
     workout.updatedAt=new Date().toISOString();
     state.entityMigrationPending=true;
     return workout.exercises.filter(function(exercise){return !exercise.isWarmup&&exercise.section!=='功能模块';}).map(exerciseEntityForRender);
@@ -235,7 +238,7 @@ function parseExercises(text,workout){
   return parsedList;
 }
 function getWorkout(){return PLAN[Math.max(0,Math.min(state.currentIndex,PLAN.length-1))];}
-function addDays(dateStr,days){let d=new Date(dateStr+'T00:00:00');d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);}
+function addDays(dateStr,days){let d=new Date(dateStr+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
 function localDateString(d){
   d=d||new Date();
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
@@ -533,6 +536,9 @@ function scheduledDateFor(index){
   index=Math.max(0,Math.min(PLAN.length-1,Number(index)||0));
   state.actualDates=state.actualDates||{};
   state.dateAnchors=state.dateAnchors||{};
+  if(typeof calculateScheduledWorkoutDate==='function'){
+    return calculateScheduledWorkoutDate(PLAN,index,state.actualDates,state.dateAnchors,state.startDate,localDateString())||plannedDateFor(index)||localDateString();
+  }
   if(readWorkoutMap(state.actualDates,index)) return readWorkoutMap(state.actualDates,index);
 
   var latest=latestActualPosition();
@@ -1665,7 +1671,6 @@ function updateRestLabel(input){
 
 
 function rebuild(){
-  autoSeedTemplatesFromPlan();
   let w=getWorkout(); let exs=parseExercises(w['训练内容（组×次数/余力）'],w);
   var actual=actualDateFor(state.currentIndex), scheduled=scheduledDateFor(state.currentIndex), planned=plannedDateFor(state.currentIndex);
   document.getElementById('dateLine').textContent = `训练序号 ${state.currentIndex+1}/${PLAN.length}｜${actual?'实际日期':'队列日期'} ${actual||scheduled}｜原计划 ${planned||'-'} ${w['星期']||''}`;
@@ -2205,11 +2210,11 @@ function calendarThemeInfo(w){
   var firstLine=(content.split(/\n|\|/)[0]||'');
   var t=[title,type,stage,label,firstLine].join(' ');
   if(/休息日|完全休息|恢复日|恢复\s*$|轻有氧|Zone2|有氧恢复/.test(t)) return {cls:'calRest',label:'休息/恢复'};
-  if(/拉\+髋铰链|髋铰链|硬拉|后链|技术/.test(t)) return {cls:'calTech',label:'技术/硬拉'};
-  if(/下肢A|前蹲|深蹲主导|前蹲主导/.test(t)) return {cls:'calLowerA',label:'下肢A'};
-  if(/下肢B|单腿|臀腿|臀推|后侧/.test(t)) return {cls:'calLowerB',label:'下肢B'};
   if(/上肢A|卧推主导|推胸|胸肩/.test(t)) return {cls:'calUpperA',label:'上肢A'};
   if(/上肢B|变式卧推|肩背|肩背手臂|背宽/.test(t)) return {cls:'calUpperB',label:'上肢B'};
+  if(/下肢A|前蹲|深蹲主导|前蹲主导/.test(t)) return {cls:'calLowerA',label:'下肢A'};
+  if(/下肢B|单腿|臀腿|臀推|后侧/.test(t)) return {cls:'calLowerB',label:'下肢B'};
+  if(/拉\+髋铰链|髋铰链|硬拉|后链/.test(t)) return {cls:'calTech',label:'技术/硬拉'};
   if(/上肢|卧推|下拉|划船|肩/.test(t)) return {cls:'calUpperA',label:'上肢'};
   if(/下肢|腿|深蹲|臀/.test(t)) return {cls:'calLowerA',label:'下肢'};
   return {cls:'calOther',label:'训练'};
@@ -2369,7 +2374,33 @@ function renderHistory(){
   let rows=[]; state.logs.slice().sort(function(a,b){return String(getLogDate(b)).localeCompare(String(getLogDate(a)));}).forEach(l=>{var d=getLogDate(l);var entries=getExerciseItemsFromLog(l);rows.push(`<tr><td>${displayDateLabel(d)}</td><td>#${(getLogIndex(l)??0)+1}</td><td>${escapeHtml(l.title||l.workoutTitle||'')}</td><td>${escapeHtml(l.status||'已完成')}</td><td>${entries.length}</td><td>${Math.round(entries.reduce((a,e)=>a+(parseFloat(e.weight)||0)*(parseFloat(e.reps)||0),0))}</td><td>${escapeHtml(l.note||'')}</td></tr>`)});
   document.getElementById('historyTable').innerHTML=`<table><thead><tr><th>实际日期</th><th>训练序号</th><th>训练标题</th><th>完成状态</th><th>记录组数</th><th>总量</th><th>备注</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
 }
-function renderSettings(){document.getElementById('startDate').value=state.startDate;document.getElementById('currentIndex').value=state.currentIndex;document.getElementById('mainRest').value=state.settings.mainRest;document.getElementById('assistRest').value=state.settings.assistRest;var recovery=document.getElementById('preV6Recovery');if(recovery)recovery.classList.toggle('hidden',!(typeof hasPreV6Backup==='function'&&hasPreV6Backup()));}
+function formatStorageBytes(bytes){bytes=Number(bytes)||0;if(bytes>=1024*1024)return (bytes/(1024*1024)).toFixed(2)+' MB';if(bytes>=1024)return (bytes/1024).toFixed(1)+' KB';return bytes+' B';}
+function renderStorageMaintenance(){
+  var box=document.getElementById('storageDiagnostic');if(!box||typeof inspectTrainingStorage!=='function')return;
+  var report=inspectTrainingStorage(),root=report.root,backup=report.preV6,usage=report.usage,breakdown=root.breakdown||{},danger=usage.totalBytes>=usage.dangerThresholdBytes;
+  box.innerHTML='<b>本地存储只读诊断</b><br>'
+    +'主状态：'+formatStorageBytes(usage.rootBytes)+'｜Program '+root.programs+'｜Workout '+root.workouts+'｜日志 '+root.workoutLogs+'｜含重量记录 '+root.weightedEntries+'<br>'
+    +'草稿 '+root.currentWorkoutDrafts+'｜动作历史索引 '+root.exerciseHistory+'｜模板 '+(root.exerciseTemplates+root.warmupTemplates)+'<br>'
+    +'主训练数据：'+formatStorageBytes(breakdown.programDataBytes)+'｜重复兼容副本：'+formatStorageBytes(breakdown.duplicateAliasBytes)+'<br>'
+    +'动作历史副本：'+formatStorageBytes(breakdown.exerciseHistoryBytes)+'｜原始/静态缓存：'+formatStorageBytes(breakdown.staticRawBytes)+'<br>'
+    +'升级前备份：'+formatStorageBytes(usage.preV6BackupBytes)+'｜Legacy：'+formatStorageBytes(usage.legacyBytes)+'｜总计：'+formatStorageBytes(usage.totalBytes)
+    +(danger?'<br><span class="dangerText">当前数据量接近常见 localStorage 危险区，请先导出原始存档。</span>':'');
+  var backupActions=document.getElementById('preV6BackupActions');if(backupActions)backupActions.classList.toggle('hidden',!backup.exists);
+  var legacyActions=document.getElementById('legacyStorageActions');
+  if(legacyActions){
+    var existingLegacy=Object.keys(report.legacy||{}).filter(function(key){return report.legacy[key]&&report.legacy[key].exists;});
+    legacyActions.classList.toggle('hidden',!existingLegacy.length);
+    legacyActions.innerHTML=existingLegacy.map(function(key){return '<button type="button" data-storage-key="'+escapeHtml(key)+'" onclick="exportLegacyKeyFromSettings(this.dataset.storageKey)">导出 Legacy：'+escapeHtml(key)+'</button>';}).join('');
+  }
+}
+function renderSettings(){
+  document.getElementById('startDate').value=state.startDate||'';document.getElementById('currentIndex').value=state.currentIndex;document.getElementById('mainRest').value=state.settings.mainRest;document.getElementById('assistRest').value=state.settings.assistRest;
+  var recovery=document.getElementById('preV6Recovery');if(recovery)recovery.classList.toggle('hidden',!(typeof hasPreV6Backup==='function'&&hasPreV6Backup()));renderStorageMaintenance();
+}
+function exportRawStateFromSettings(){try{exportRawTrainingState();showToast('已导出原始本地存档');}catch(error){console.error('导出原始本地存档失败',error);alert('导出失败：'+(error.message||error));}}
+function exportPreV6FromSettings(){try{exportRawPreV6Backup();showToast('已导出升级前原始备份');}catch(error){console.error('导出升级前备份失败',error);alert('导出失败：'+(error.message||error));}}
+function exportLegacyKeyFromSettings(key){try{exportRawLegacyStorageKey(key);showToast('已导出 Legacy 原始数据');}catch(error){console.error('导出 Legacy 原始数据失败',error);alert('导出失败：'+(error.message||error));}}
+function deletePreV6FromSettings(){try{if(deletePreV6Backup()){renderSettings();showToast('已删除本机升级前快照');}}catch(error){console.error('删除升级前备份失败',error);alert('删除失败：'+(error.message||error));}}
 function saveSettings(){state.startDate=document.getElementById('startDate').value;state.currentIndex=parseInt(document.getElementById('currentIndex').value)||0;state.settings.mainRest=parseInt(document.getElementById('mainRest').value)||180;state.settings.assistRest=parseInt(document.getElementById('assistRest').value)||90;saveState();rebuild();alert('设置已保存。');}
 function restoreUpgradeBackupFromSettings(){
   try{

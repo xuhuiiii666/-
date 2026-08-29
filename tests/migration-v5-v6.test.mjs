@@ -68,7 +68,7 @@ test('M11. 迁移失败时正式根状态不被覆盖',()=>{
   app.normalizeExerciseWithPrescription=()=>{throw new Error('模拟迁移失败');};
   assert.throws(()=>app.initializeTrainingTracker(samplePlan,sampleWarmups),/模拟迁移失败/);
   assert.equal(storage.getItem('training-tracker-state'),raw);
-  assert.equal(storage.getItem('training-tracker-state-pre-v6-backup'),raw);
+  assert.equal(storage.getItem('training-tracker-state-pre-v6-backup'),null);
 });
 
 test('M12. pre-v6 安全快照可以恢复且不会被删除',()=>{

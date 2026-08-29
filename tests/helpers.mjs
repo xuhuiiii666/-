@@ -29,7 +29,7 @@ export function createContext(storage=new MemoryStorage()){
     Error,
     confirm:()=>true,
     alert:()=>{},
-    document:{querySelector:()=>null,createElement:()=>({}),body:{appendChild(){},removeChild(){}}},
+    document:{querySelector:()=>null,createElement:()=>({click(){}}),body:{appendChild(){},removeChild(){}}},
     URL:{createObjectURL:()=>'',revokeObjectURL(){}},
     Blob:class Blob {}
   };

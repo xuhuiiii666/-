@@ -1217,6 +1217,7 @@ body{
 .importPrecheck.blocked{border-color:rgba(255,106,126,.45);background:rgba(255,106,126,.08)}
 .maintenanceRecovery{margin-top:20px;padding-top:14px;border-top:1px solid var(--line)}
 .maintenanceRecovery button{margin-top:8px;opacity:.76}
+.dangerText{color:#b91c1c;font-weight:600}
 @media(max-width:430px){
   .setPrescription{gap:5px;font-size:11px}
   .setTypeBadge{min-height:20px;padding:1px 6px}

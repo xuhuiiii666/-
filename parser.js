@@ -224,8 +224,47 @@ function formatParsedExerciseLine(parsed, mode){
   return out.trim();
 }
 
+function validScheduleDate(value){return /^\d{4}-\d{2}-\d{2}$/.test(String(value||''));}
+function addScheduleDays(value,days){var date=new Date(String(value)+'T00:00:00Z');if(isNaN(date.getTime()))return '';date.setUTCDate(date.getUTCDate()+Number(days||0));return date.toISOString().slice(0,10);}
+function scheduleMapValue(map,days,index){var day=days[index]||{},key=day.workoutId||String(index);return map&&map[key]!==undefined?map[key]:map&&map[String(index)];}
+function calculateScheduledWorkoutDate(days,index,actualDates,dateAnchors,startDate,fallbackDate){
+  days=Array.isArray(days)?days:[];if(!days.length)return '';
+  index=Math.max(0,Math.min(days.length-1,Number(index)||0));actualDates=actualDates||{};dateAnchors=dateAnchors||{};
+  var currentActual=scheduleMapValue(actualDates,days,index);if(validScheduleDate(currentActual))return currentActual;
+  function mapIndex(key){var numeric=Number(key);if(String(numeric)===String(key)&&isFinite(numeric))return numeric;return days.findIndex(function(day){return day&&day.workoutId===key;});}
+  var actualItems=Object.keys(actualDates).map(function(key){return {index:mapIndex(key),date:actualDates[key]};}).filter(function(item){return item.index>=0&&validScheduleDate(item.date);}).sort(function(a,b){return String(b.date).localeCompare(String(a.date))||b.index-a.index;});
+  var anchor=null;
+  if(actualItems.length&&index>actualItems[0].index)anchor=actualItems[0];
+  if(!anchor){
+    var source=Object.assign({},dateAnchors,actualDates);
+    var prior=Object.keys(source).map(function(key){return {index:mapIndex(key),date:source[key]};}).filter(function(item){return item.index>=0&&item.index<=index&&validScheduleDate(item.date);}).sort(function(a,b){return b.index-a.index;});
+    anchor=prior[0]||null;
+  }
+  var position=anchor?anchor.index:0;
+  var firstPlanned=days[0]&&(days[0].plannedDate||days[0]['plannedDate']||days[0]['日期']||days[0].date);
+  var cursor=anchor?anchor.date:(validScheduleDate(firstPlanned)?firstPlanned:(validScheduleDate(startDate)?startDate:fallbackDate));
+  if(!validScheduleDate(cursor))return '';
+  if(position===index)return cursor;
+  for(var i=position+1;i<=index;i++){
+    var actual=scheduleMapValue(actualDates,days,i),manual=scheduleMapValue(dateAnchors,days,i),planned=days[i]&&(days[i].plannedDate||days[i]['plannedDate']||days[i]['日期']||days[i].date);
+    if(validScheduleDate(actual))cursor=actual;
+    else if(validScheduleDate(manual))cursor=manual;
+    else if(validScheduleDate(planned)&&String(planned)>String(cursor))cursor=planned;
+    else cursor=addScheduleDays(cursor,1);
+  }
+  return cursor;
+}
+
 function classifyTrainingDay(day){
   day = day || {};
+  var structuredType=String(day.trainingType||day.classification||day['训练类型']||'').trim();
+  var exact={
+    '上肢A':{kind:'上肢A',cls:'calUpperA',label:'上肢A'},'上肢B':{kind:'上肢B',cls:'calUpperB',label:'上肢B'},
+    '下肢A':{kind:'下肢A',cls:'calLowerA',label:'下肢A'},'下肢B':{kind:'下肢B',cls:'calLowerB',label:'下肢B'},
+    '休息/恢复':{kind:'休息',cls:'calRest',label:'休息/恢复'},'休息':{kind:'休息',cls:'calRest',label:'休息/恢复'},
+    '技术/硬拉':{kind:'后链/硬拉',cls:'calTech',label:'技术/硬拉'},'后链/硬拉':{kind:'后链/硬拉',cls:'calTech',label:'技术/硬拉'}
+  };
+  if(exact[structuredType])return exact[structuredType];
   var title = String(day['训练主题'] || day.theme || '');
   var type = String(day['类型'] || day.type || '');
   var stage = String(day['阶段'] || day.stage || '');
@@ -236,15 +275,17 @@ function classifyTrainingDay(day){
 
   if(/休息日|完全休息|恢复日|恢复\s*$|休息\/轻活动|轻活动|轻有氧|有氧恢复/.test(t)) return {kind:'休息', cls:'calRest', label:'休息/恢复'};
   if(/有氧日|正式有氧|有氧训练|Zone\s*2/i.test(t)) return {kind:'有氧', cls:'calOther', label:'有氧'};
-  if(/硬拉|后链|髋铰链|拉\+髋铰链|技术/.test(t)) return {kind:'后链/硬拉', cls:'calTech', label:'技术/硬拉'};
-  if(/下肢A|深蹲主导|前蹲主导|前蹲|深蹲/.test(t)) return {kind:'下肢A', cls:'calLowerA', label:'下肢A'};
-  if(/下肢B|单腿|臀腿|臀推|后侧/.test(t)) return {kind:'下肢B', cls:'calLowerB', label:'下肢B'};
   if(/上肢A|卧推主导|推胸|胸肩/.test(t)) return {kind:'上肢A', cls:'calUpperA', label:'上肢A'};
   if(/上肢B|变式卧推|肩背|肩背手臂|背宽/.test(t)) return {kind:'上肢B', cls:'calUpperB', label:'上肢B'};
+  if(/下肢A|深蹲主导|前蹲主导|前蹲|深蹲/.test(t)) return {kind:'下肢A', cls:'calLowerA', label:'下肢A'};
+  if(/下肢B|单腿|臀腿|臀推|后侧/.test(t)) return {kind:'下肢B', cls:'calLowerB', label:'下肢B'};
+  if(/硬拉|后链|髋铰链|拉\+髋铰链/.test(t)) return {kind:'后链/硬拉', cls:'calTech', label:'技术/硬拉'};
   if(/上肢|卧推|下拉|划船|肩/.test(t)) return {kind:'上肢', cls:'calUpperA', label:'上肢'};
   if(/下肢|腿|臀/.test(t)) return {kind:'下肢', cls:'calLowerA', label:'下肢'};
   return {kind:'训练', cls:'calOther', label:'训练'};
 }
+
+if(typeof globalThis!=='undefined')globalThis.calculateScheduledWorkoutDate=calculateScheduledWorkoutDate;
 
 function classifyExerciseTemplate(exercise){
   var name = String((exercise && (exercise.name || exercise.trackName || exercise.line)) || '');

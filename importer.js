@@ -557,7 +557,15 @@ function programFromImportPreview(){
 function refreshAfterProgramImport(message){
   state=getActiveProgram();PLAN=state.days;WARMUPS=(state.warmupDefinitions&&state.warmupDefinitions.length)?state.warmupDefinitions:(trainingTrackerState.builtinWarmups||BUILTIN_WARMUPS);
   autoSeedTemplatesFromPlan();
-  saveState();rebuild();renderCalendar();renderHistory();alert(message);showTab('today');
+  try{saveState();}catch(error){
+    if(typeof isStorageQuotaError==='function'&&isStorageQuotaError(error)){console.error('导入后的模板沉淀未保存',error);showToast('训练计划已保存，但动作模板更新因存储空间不足未保存');}
+    else throw error;
+  }
+  rebuild();renderCalendar();renderHistory();alert(message);showTab('today');
+}
+function importApplyErrorMessage(error){
+  if(typeof isStorageQuotaError==='function'&&isStorageQuotaError(error)) return '训练计划已经识别成功，但浏览器本地存储空间不足，因此没有保存新计划。当前计划未修改。';
+  return '无法识别该训练计划，没有修改当前训练计划。\n'+(error&&error.message?error.message:error);
 }
 function applyImportPlan(){
   try{
@@ -565,7 +573,7 @@ function applyImportPlan(){
     if(!confirm('确认把“'+program.name+'”导入为新的训练计划？现有训练计划和记录不会被覆盖。')) return;
     addProgram(program,true);
     refreshAfterProgramImport('已导入为新的训练计划：'+program.days.length+'天。');
-  }catch(error){console.error('导入训练计划失败',error);alert('无法识别该训练计划，没有修改当前训练计划。\n'+(error.message||error));}
+  }catch(error){console.error('导入训练计划失败',error);alert(importApplyErrorMessage(error));}
 }
 function replaceCurrentWithImportPlan(){
   try{
@@ -573,7 +581,7 @@ function replaceCurrentWithImportPlan(){
     if(!confirm('确认替换当前训练计划？当前计划中的训练日、草稿和日志会被新的计划替换。其他训练计划不受影响。')) return;
     replaceActiveProgram(program);
     refreshAfterProgramImport('已替换当前训练计划：'+program.days.length+'天。');
-  }catch(error){console.error('替换训练计划失败',error);alert('无法识别该训练计划，没有修改当前训练计划。\n'+(error.message||error));}
+  }catch(error){console.error('替换训练计划失败',error);alert(importApplyErrorMessage(error));}
 }
 function resetImportedPlan(){
   if(!confirm('确认恢复示例计划？示例计划会作为新的训练计划加入，不覆盖当前训练日志。')) return;
