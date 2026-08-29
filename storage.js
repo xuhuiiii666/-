@@ -320,51 +320,6 @@
     return restored;
   }
 
-  function createProgramFromPlan(days,options){
-    options=options||{};
-    return normalizeProgram({programId:options.programId,name:options.name||options.sourceFileName||'导入训练计划',source:options.source||'imported',sourceFileName:options.sourceFileName||'',days:copy(days||[])},options);
-  }
-  function addProgram(program,activate){
-    var root=global.trainingTrackerState;
-    var profile=getActiveProfile(root);
-    var next=normalizeProgram(program);
-    profile.programs[next.programId]=next;
-    if(activate!==false) root.activeProgramId=next.programId;
-    bindRuntime(root);saveRoot(root);return next;
-  }
-  function replaceActiveProgram(program){
-    var root=global.trainingTrackerState;
-    var profile=getActiveProfile(root);
-    var currentId=root.activeProgramId;
-    var next=normalizeProgram(Object.assign({},program,{programId:currentId}));
-    profile.programs[currentId]=next;
-    bindRuntime(root);saveRoot(root);return next;
-  }
-  function activateProgram(programId){
-    var root=global.trainingTrackerState;
-    var profile=getActiveProfile(root);
-    if(!profile||!profile.programs[programId]) throw new Error('训练计划不存在。');
-    syncProgram(getActiveProgram(root));root.activeProgramId=programId;bindRuntime(root);saveRoot(root);return getActiveProgram(root);
-  }
-  function createCustomWorkout(title,options){
-    options=options||{};
-    var program=getActiveProgram();
-    if(!program) throw new Error('当前没有可写入的训练计划。');
-    var stamp=nowIso();
-    var cleanTitle=String(title||'我的训练').trim()||'我的训练';
-    var workout=normalizeWorkout({workoutId:makeId('workout'),source:'custom',title:cleanTitle,'训练主题':cleanTitle,exercises:asArray(options.exercises),createdAt:stamp,updatedAt:stamp},program.days.length,program.programId,'custom');
-    program.days.push(workout);program.updatedAt=stamp;
-    if(options.activate){program.currentIndex=program.days.length-1;program.currentWorkoutId=workout.workoutId;}
-    saveState();return workout;
-  }
-  function addExerciseToWorkout(workoutId,exercise){
-    var program=getActiveProgram();
-    var workout=asArray(program&&program.days).find(function(item){return item.workoutId===workoutId;});
-    if(!workout) throw new Error('找不到要修改的训练。');
-    var next=normalizeExercise(exercise,workout.exercises.length);
-    workout.exercises.push(next);workout.updatedAt=nowIso();saveState();return next;
-  }
-
   function buildCycleBackupObject(){
     if(typeof global.syncCurrentWorkoutFormToState==='function') global.syncCurrentWorkoutFormToState();
     var active=getActiveProgram();
@@ -456,12 +411,8 @@
   global.initializeTrainingTracker=initializeTrainingTracker;
   global.getActiveProfile=getActiveProfile;
   global.getActiveProgram=getActiveProgram;
-  global.createProgramFromPlan=createProgramFromPlan;
-  global.addProgram=addProgram;
-  global.replaceActiveProgram=replaceActiveProgram;
-  global.activateProgram=activateProgram;
-  global.createCustomWorkout=createCustomWorkout;
-  global.addExerciseToWorkout=addExerciseToWorkout;
+  global.bindTrainingRuntime=bindRuntime;
+  global.syncProgramToRoot=syncProgram;
   global.buildCycleBackupObject=buildCycleBackupObject;
   global.downloadCycleBackupFile=downloadCycleBackupFile;
   global.exportCycleBackup=exportCycleBackup;

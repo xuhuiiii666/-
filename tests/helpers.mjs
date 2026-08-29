@@ -47,6 +47,7 @@ export function loadStorage(storage=new MemoryStorage()){
   const context=createContext(storage);
   loadScript(context,'prescription.js');
   loadScript(context,'storage.js');
+  loadScript(context,'program-store.js');
   return context;
 }
 
@@ -55,7 +56,9 @@ export function loadImporter(storage=new MemoryStorage()){
   context.normalizeExcelRows=rows=>(rows||[]).filter(row=>row.some(cell=>String(cell??'').trim())).map(row=>row.map(cell=>String(cell??'').trim()));
   loadScript(context,'prescription.js');
   loadScript(context,'parser.js');
+  loadScript(context,'import-validator.js');
   loadScript(context,'importer.js');
+  loadScript(context,'program-store.js');
   return context;
 }
 
@@ -66,7 +69,9 @@ export function loadTrainingModules(storage=new MemoryStorage()){
   loadScript(context,'storage.js');
   loadScript(context,'parser.js');
   loadScript(context,'history.js');
+  loadScript(context,'import-validator.js');
   loadScript(context,'importer.js');
+  loadScript(context,'program-store.js');
   return context;
 }
 

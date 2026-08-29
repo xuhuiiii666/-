@@ -17,9 +17,11 @@
 - index.html：页面结构入口
 - style.css：样式与手机适配
 - app.js：主交互、页面切换、训练执行
-- importer.js：Excel 文件导入
+- importer.js：Workbook 读取、Structured/Legacy 格式识别和导入预览
+- import-validator.js：Structured Import v1 严格校验
 - parser.js：训练内容解析
 - storage.js：localStorage、备份导入导出、数据迁移
+- program-store.js：Program / Workout / Exercise 创建和计划切换
 - templates.js：训练动作库与热身动作库
 - prescription.js：动作与组处方、setType、目标范围和重量调整
 - history.js：训练日志派生的动作历史、上次同名和完整历史展示

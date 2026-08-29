@@ -11,7 +11,7 @@ function ImportError(message,code,details){
 }
 ImportError.prototype=Object.create(Error.prototype);
 ImportError.prototype.constructor=ImportError;
-function asImportError(error){return error instanceof ImportError?error:new ImportError(error&&error.message?error.message:String(error||'无法识别该训练计划。'));}
+function asImportError(error){return error instanceof ImportError?error:new ImportError(error&&error.message?error.message:String(error||'无法识别该训练计划。'),error&&error.code,error&&error.details||(error&&error.report?{report:error.report}:null));}
 
 function normalizeDash(s){ return String(s||'').replace(/[—]/g,'-').replace(/[–]/g,'-').replace(/×/g,'x').trim(); }
 function parseDelimited(text){
@@ -476,153 +476,13 @@ function validateImportedPlan(plan){
   return {valid:Array.isArray(plan)&&plan.length>0,dayCount:(plan||[]).length,duplicateDays:duplicateDays};
 }
 
-var STRUCTURED_DATA_SHEET='训练器数据_v1';
-var STRUCTURED_SET_SHEET='组计划_v1';
-var STRUCTURED_DATA_HEADERS=['schemaVersion','programName','workoutId','顺序','plannedDate','训练主题','section','exerciseId','动作顺序','动作名称','组数','次数下限','次数上限','RIR下限','RIR上限','建议重量','单位','休息下限秒','休息上限秒','动作秒数','动作备注','超级组ID','是否热身'];
-var STRUCTURED_SET_HEADERS=['workoutId','exerciseId','组号','setType','次数下限','次数上限','RIR下限','RIR上限','休息下限秒','休息上限秒','重量调整类型','重量调整值','技术提示'];
-var STRUCTURED_SECTIONS=['功能模块','主项','主辅助','辅助','核心','康复/辅助','有氧','恢复','休息'];
-
 function detectStructuredFormat(workbook){
   return !!(workbook&&Array.isArray(workbook.SheetNames)&&workbook.SheetNames.indexOf(STRUCTURED_DATA_SHEET)>=0);
 }
-function structuredSheetRows(workbook,name){return rowsFromSheet(workbook&&workbook.Sheets&&workbook.Sheets[name]);}
-function structuredHeaderMap(headers){
-  var map={};(headers||[]).forEach(function(header,index){map[String(header||'').trim()]=index;});return map;
-}
-function structuredRowsToObjects(rows){
-  if(!rows.length) return [];
-  var map=structuredHeaderMap(rows[0]);
-  return rows.slice(1).map(function(row,rowIndex){
-    var object={_row:rowIndex+2};Object.keys(map).forEach(function(header){object[header]=row[map[header]]===undefined?'':row[map[header]];});return object;
-  }).filter(function(row){return Object.keys(row).some(function(key){return key!=='_row'&&String(row[key]||'').trim()!=='';});});
-}
-function missingStructuredHeaders(rows,required){
-  var map=structuredHeaderMap(rows[0]||[]);return required.filter(function(header){return map[header]===undefined;});
-}
-function structuredNumber(value){
-  if(value===null||value===undefined||String(value).trim()==='') return null;
-  var number=Number(value);return isFinite(number)?number:null;
-}
-function structuredBoolean(value){return /^(?:1|true|yes|是|热身)$/i.test(String(value||'').trim());}
-function validateRange(report,row,minField,maxField,label,options){
-  options=options||{};
-  var min=structuredNumber(row[minField]),max=structuredNumber(row[maxField]);
-  if(String(row[minField]||'').trim()!==''&&min===null) report.errors.push('第 '+row._row+' 行 '+label+'下限不是数字');
-  if(String(row[maxField]||'').trim()!==''&&max===null) report.errors.push('第 '+row._row+' 行 '+label+'上限不是数字');
-  if(min!==null&&max!==null&&max<min) report.errors.push('第 '+row._row+' 行 '+label+'上限小于下限');
-  if(options.min!==undefined&&((min!==null&&min<options.min)||(max!==null&&max<options.min))) report.errors.push('第 '+row._row+' 行 '+label+'不能小于 '+options.min);
-  if(options.max!==undefined&&((min!==null&&min>options.max)||(max!==null&&max>options.max))) report.errors.push('第 '+row._row+' 行 '+label+'不能大于 '+options.max);
-}
-function validateStructuredWorkbook(workbook){
-  var report={format:'Structured Import v1',errors:[],warnings:[],checks:[],stats:{workouts:0,exercises:0,sets:0,specialSets:0},dataRows:[],setRows:[]};
-  if(!detectStructuredFormat(workbook)){
-    report.errors.push('缺少必需工作表「'+STRUCTURED_DATA_SHEET+'」');return report;
-  }
-  var dataRows=structuredSheetRows(workbook,STRUCTURED_DATA_SHEET);
-  var missing=missingStructuredHeaders(dataRows,STRUCTURED_DATA_HEADERS);
-  if(missing.length){report.errors.push('「'+STRUCTURED_DATA_SHEET+'」缺少列：'+missing.join('、'));return report;}
-  report.dataRows=structuredRowsToObjects(dataRows);
-  if(!report.dataRows.length) report.errors.push('「'+STRUCTURED_DATA_SHEET+'」没有动作数据');
-  var exerciseKeys={},workouts={};
-  report.dataRows.forEach(function(row){
-    var prefix='第 '+row._row+' 行 ';
-    if(String(row.schemaVersion||'').trim()!=='1') report.errors.push(prefix+'schemaVersion 必须为 1');
-    ['programName','workoutId','顺序','训练主题','section','exerciseId','动作顺序','动作名称','组数'].forEach(function(field){if(String(row[field]||'').trim()==='') report.errors.push(prefix+'缺少 '+field);});
-    if(/^【\s*(?:功能模块|主项|主辅助|辅助|核心|康复\/辅助|有氧|恢复|休息)\s*】$/.test(String(row['动作名称']||'').trim())) report.errors.push(prefix+'动作名称不能是 section 标记');
-    if(STRUCTURED_SECTIONS.indexOf(String(row.section||'').trim())<0) report.errors.push(prefix+'section 不受支持：'+row.section);
-    var count=structuredNumber(row['组数']);if(count===null||count<1||Math.floor(count)!==count) report.errors.push(prefix+'组数必须是正整数');
-    validateRange(report,row,'次数下限','次数上限','次数',{min:0});
-    validateRange(report,row,'RIR下限','RIR上限','RIR',{min:0,max:10});
-    validateRange(report,row,'休息下限秒','休息上限秒','休息',{min:0});
-    var key=String(row.workoutId||'')+'::'+String(row.exerciseId||'');
-    if(exerciseKeys[key]) report.errors.push(prefix+'workoutId + exerciseId 重复');
-    exerciseKeys[key]=row;
-    workouts[String(row.workoutId||'')]=true;
-    report.stats.sets+=Math.max(0,Number(count)||0);
-  });
-  if(workbook.SheetNames.indexOf(STRUCTURED_SET_SHEET)>=0){
-    var setRows=structuredSheetRows(workbook,STRUCTURED_SET_SHEET);
-    var setMissing=missingStructuredHeaders(setRows,STRUCTURED_SET_HEADERS);
-    if(setMissing.length) report.errors.push('「'+STRUCTURED_SET_SHEET+'」缺少列：'+setMissing.join('、'));
-    else report.setRows=structuredRowsToObjects(setRows);
-  }else report.warnings.push('未提供「'+STRUCTURED_SET_SHEET+'」，所有组将按普通工作组生成');
-  var seenSets={};
-  report.setRows.forEach(function(row){
-    var prefix='组计划第 '+row._row+' 行 ', key=String(row.workoutId||'')+'::'+String(row.exerciseId||'');
-    var source=exerciseKeys[key];
-    if(!source) report.errors.push(prefix+'找不到对应动作 '+key);
-    var setNo=structuredNumber(row['组号']);
-    if(setNo===null||setNo<1||Math.floor(setNo)!==setNo) report.errors.push(prefix+'组号必须是正整数');
-    if(source&&setNo>Number(source['组数'])) report.errors.push(prefix+'组号超过动作组数');
-    if(!isValidPrescriptionSetType(String(row.setType||''))) report.errors.push(prefix+'setType 只能是 '+PRESCRIPTION_SET_TYPES.join('/'));
-    var setKey=key+'::'+setNo;if(seenSets[setKey]) report.errors.push(prefix+'同一动作组号重复');seenSets[setKey]=true;
-    validateRange(report,row,'次数下限','次数上限','次数',{min:0});
-    validateRange(report,row,'RIR下限','RIR上限','RIR',{min:0,max:10});
-    validateRange(report,row,'休息下限秒','休息上限秒','休息',{min:0});
-    var adjustment=String(row['重量调整类型']||'').trim();
-    if(adjustment&&['percent','absolute'].indexOf(adjustment)<0) report.errors.push(prefix+'重量调整类型只能是 percent 或 absolute');
-    if(adjustment&&structuredNumber(row['重量调整值'])===null) report.errors.push(prefix+'重量调整值必须是数字');
-  });
-  report.stats.workouts=Object.keys(workouts).length;
-  report.stats.exercises=report.dataRows.length;
-  report.stats.specialSets=report.setRows.length;
-  if(!report.errors.length){
-    report.checks.push('固定列校验通过');
-    report.checks.push('训练日与动作 ID 校验通过');
-    report.checks.push('组范围与 setType 校验通过');
-  }
-  return report;
-}
-function parseSetPrescriptionSheet(report){
-  var map={};
-  (report.setRows||[]).forEach(function(row){
-    var key=String(row.workoutId)+'::'+String(row.exerciseId);
-    map[key]=map[key]||[];
-    map[key].push({
-      setNo:Number(row['组号']),setType:String(row.setType||'working'),
-      targetRepsMin:structuredNumber(row['次数下限']),targetRepsMax:structuredNumber(row['次数上限']),
-      targetRirMin:structuredNumber(row['RIR下限']),targetRirMax:structuredNumber(row['RIR上限']),
-      targetRestMin:structuredNumber(row['休息下限秒']),targetRestMax:structuredNumber(row['休息上限秒']),
-      loadAdjustmentType:String(row['重量调整类型']||''),loadAdjustmentValue:structuredNumber(row['重量调整值']),
-      techniqueCue:String(row['技术提示']||'')
-    });
-  });
-  return map;
-}
-function parseProgramSheet(report){
-  var setMap=parseSetPrescriptionSheet(report), workoutMap={};
-  report.dataRows.forEach(function(row){
-    var workoutId=String(row.workoutId), exerciseId=String(row.exerciseId), section=String(row.section).trim();
-    var workout=workoutMap[workoutId];
-    if(!workout){
-      workout=workoutMap[workoutId]={workoutId:workoutId,source:'structured-v1',order:Number(row['顺序'])||0,plannedDate:normalizeImportedDateCell(row.plannedDate),date:normalizeImportedDateCell(row.plannedDate),title:String(row['训练主题']),programName:String(row.programName),exercises:[]};
-      workout['训练主题']=workout.title;workout['训练内容（组×次数/余力）']='';workout['导入热身内容']='';
-    }
-    var prescription={repsMin:structuredNumber(row['次数下限']),repsMax:structuredNumber(row['次数上限']),rirMin:structuredNumber(row['RIR下限']),rirMax:structuredNumber(row['RIR上限']),restMin:structuredNumber(row['休息下限秒']),restMax:structuredNumber(row['休息上限秒']),recommendedWeight:String(row['建议重量']||''),unit:String(row['单位']||'kg')};
-    var exercise={exerciseId:exerciseId,source:'structured-v1',section:section,isWarmup:structuredBoolean(row['是否热身'])||section==='功能模块',order:Number(row['动作顺序'])||0,name:String(row['动作名称']),trackingName:String(row['动作名称']),originalName:String(row['动作名称']),setCount:Number(row['组数'])||1,duration:String(row['动作秒数']||''),note:String(row['动作备注']||''),supersetId:String(row['超级组ID']||''),recommendedWeight:String(row['建议重量']||''),unit:String(row['单位']||'kg'),prescription:prescription,sets:[]};
-    exercise=expandSetPrescription(exercise,exercise.setCount,setMap[workoutId+'::'+exerciseId]||[]);
-    exercise.sets.forEach(function(set){set.prescriptionDefined=true;});
-    workout.exercises.push(exercise);
-  });
-  return Object.keys(workoutMap).map(function(id){
-    var workout=workoutMap[id];workout.exercises.sort(function(a,b){return a.order-b.order;});
-    var main=workout.exercises.filter(function(exercise){return !exercise.isWarmup;});
-    var warm=workout.exercises.filter(function(exercise){return exercise.isWarmup;});
-    workout['导入热身内容']=warm.map(function(exercise){return exercise.name+' '+exercise.setCount+'x'+(exercise.prescription.repsMin||exercise.duration||'');}).join('\n');
-    workout['训练内容（组×次数/余力）']=main.map(function(exercise){return exercise.name+' '+exercise.setCount+'x'+(exercise.prescription.repsMin||exercise.duration||'');}).join('\n');
-    return workout;
-  }).sort(function(a,b){return a.order-b.order;});
-}
-function createStandardProgram(report,file){
-  if(!report||report.errors.length) throw new ImportError('Structured Import v1 校验失败，没有修改当前训练计划。','STRUCTURED_VALIDATION_FAILED',{report:report});
-  var plan=parseProgramSheet(report);
-  return {format:'structured-v1',type:'Structured Import v1',planType:{id:'structured-v1',label:'Structured Import v1'},plan:plan,warmups:[],report:report,validation:{valid:true,dayCount:plan.length,duplicateDays:[]},sheetName:STRUCTURED_DATA_SHEET,source:'file',sourceFileName:file&&file.name||'',candidates:[STRUCTURED_DATA_SHEET]};
-}
-
 function parseWorkbookToImport(workbook, file){
   try{
     if(detectStructuredFormat(workbook)){
-      var structuredReport=validateStructuredWorkbook(workbook);
+      var structuredReport=validateStructuredWorkbook(workbook,rowsFromSheet);
       return createStandardProgram(structuredReport,file);
     }
     var planType = detectPlanType(file || workbook);
@@ -690,7 +550,7 @@ function renderImportPrecheck(parsed,fileName,error){
 function programFromImportPreview(){
   if(!lastImportPreview) previewImportPlan();
   if(!lastImportPreview || !lastImportPreview.plan || !lastImportPreview.plan.length) throw new ImportError('请先成功预览训练计划。','NO_PREVIEW');
-  var program=createProgramFromPlan(lastImportPreview.plan,{name:lastImportPreview.sourceFileName||'导入训练计划',source:'excel',sourceFileName:lastImportPreview.sourceFileName||''});
+  var program=createProgramFromPlan(lastImportPreview.plan,{name:lastImportPreview.programName||lastImportPreview.sourceFileName||'导入训练计划',source:lastImportPreview.format==='structured-v1'?'structured-v1':'excel',sourceFileName:lastImportPreview.sourceFileName||''});
   program.warmupDefinitions=(lastImportPreview.warmups||[]).slice();
   return program;
 }
@@ -728,34 +588,6 @@ function fillImportHintB(){
   document.getElementById('importBox').value='顺序日\\t周次\\t周内日\\t类型\\t主题\\t今日内容（整格照做）\\t完成日期/备注\\n1\\t1\\t周一\\t训练日\\t第1周｜下肢A\\t【功能/热身】\\n- 90/90呼吸 2组×5次呼吸\\n- 高脚杯深蹲底部停留 2组×20秒\\n\\n【主训练】\\n1. 箱式高脚杯深蹲｜4组×10次｜余力3｜休75-90秒\\n   观察：全脚掌踩地\\n2. 腿举｜3组×12次｜余力2-3｜休75秒\\t';
 }
 function clearImportBox(){ document.getElementById('importBox').value=''; document.getElementById('importPreview').textContent='尚未预览。'; lastImportPreview=null; }
-
-function downloadStandardPlanTemplate(){
-  if(typeof XLSX==='undefined'||!XLSX.utils){alert('Excel 解析库尚未加载，请联网刷新后再下载模板。');return;}
-  var instructions=[
-    ['训练器标准训练计划 v1'],
-    ['填写规则','训练器数据_v1 每行一个动作；组计划_v1 只填写需要特殊处理的组。'],
-    ['固定 section','功能模块 / 主项 / 主辅助 / 辅助 / 核心 / 康复/辅助 / 有氧 / 恢复 / 休息'],
-    ['固定 setType','working / technique / warmup / top / backoff / dropset'],
-    ['重要','不要改工作表名称和表头；section 标记不能作为动作名称。'],
-    ['导入行为','导入成功后建立一个新的 Program，不覆盖当前计划。']
-  ];
-  var data=[STRUCTURED_DATA_HEADERS,
-    ['1','示例12周计划','w001','1','2026-09-01','下肢A','主项','ex001','1','抬脚跟停顿前蹲','4','5','5','2','3','62.5','kg','150','210','','保持足弓','','否'],
-    ['1','示例12周计划','w001','1','2026-09-01','下肢A','辅助','ex002','2','腿举','3','8','10','2','3','','kg','90','120','','控制离心','','否'],
-    ['1','示例12周计划','w001','1','2026-09-01','下肢A','功能模块','warm001','0','踝背屈','2','10','12','','','','kg','30','45','','膝盖向脚尖方向','','是']
-  ];
-  var sets=[STRUCTURED_SET_HEADERS,
-    ['w001','ex001','1','technique','5','5','3','3','150','180','','','动作速度稳定'],
-    ['w001','ex001','2','top','5','5','2','2','180','210','','','本日顶组'],
-    ['w001','ex001','3','backoff','5','5','2','3','150','180','percent','-15','回退保持动作质量']
-  ];
-  var workbook=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet(instructions),'填写说明');
-  XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet(data),STRUCTURED_DATA_SHEET);
-  XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet(sets),STRUCTURED_SET_SHEET);
-  XLSX.writeFile(workbook,'训练器标准训练计划_v1.xlsx');
-}
-
 
 function rowsToDelimitedText(rows){
   var out=[];

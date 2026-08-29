@@ -223,14 +223,13 @@
   <section id="importer" class="hidden">
     <div class="card">
       <h3>导入适配</h3>
-      <p class="small">推荐：直接选择 .xlsx 文件。支持：① 12周训练内容总表；② 徐晖版/肖悦版「手机查看版_一日一格」；③ 逐日执行类表格。会优先读取一日一格的“今天整块内容”，自动跳过导航页。文件只在本机浏览器读取，不上传。</p>
+      <p class="small">推荐：直接选择 .xlsx 文件。存在「训练器数据_v1」时按 Structured Import v1 严格校验；不存在时继续兼容徐晖版、肖悦版、手机查看版_一日一格和旧逐日执行表。文件只在本机浏览器读取，不上传。</p>
       <div class="row" style="margin-top:10px">
         <label class="primary" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
           选择 Excel 文件
           <input id="excelFileInput" type="file" accept=".xlsx,.xls,.csv,.tsv" onchange="importExcelFile(this.files && this.files[0])" style="display:none">
         </label>
         <button onclick="previewImportPlan()">预览文本区</button>
-        <button onclick="downloadStandardPlanTemplate()">下载标准计划模板</button>
         <button class="ok" onclick="applyImportPlan()">导入为新的训练计划</button>
         <button onclick="replaceCurrentWithImportPlan()">替换当前计划</button>
         <button class="bad" onclick="resetImportedPlan()">恢复示例计划</button>
@@ -378,12 +377,14 @@
   </div>
 </div>
 <div id="timerConfirmMask" class="timerConfirmMask"><div class="timerConfirmBox"><h3 id="timerConfirmTitle">倒计时结束</h3><p id="timerConfirmBody">可以开始下一步。</p><button type="button" onclick="closeTimerConfirm()">确认</button></div></div>
-<script src="prescription.js?v=20260829-v6safe"></script>
-<script src="storage.js?v=20260829-v6safe"></script>
-<script src="templates.js?v=20260829-v6safe"></script>
+<script src="prescription.js?v=20260829-structured-v1"></script>
+<script src="storage.js?v=20260829-structured-v1"></script>
+<script src="templates.js?v=20260829-structured-v1"></script>
 <script src="parser.js?v=20260729-compound"></script>
-<script src="history.js?v=20260829-v6safe"></script>
-<script src="importer.js?v=20260829-v6safe"></script>
-<script src="app.js?v=20260829-v6safe"></script>
+<script src="history.js?v=20260829-structured-v1"></script>
+<script src="import-validator.js?v=20260829-structured-v1"></script>
+<script src="importer.js?v=20260829-structured-v1"></script>
+<script src="program-store.js?v=20260829-structured-v1"></script>
+<script src="app.js?v=20260829-structured-v1"></script>
 </body>
 </html>

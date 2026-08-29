@@ -31,9 +31,12 @@ function fullContext(){
   const storage=new MemoryStorage();
   const context=createContext(storage);
   context.normalizeExcelRows=rows=>(rows||[]).filter(row=>row.some(Boolean)).map(row=>row.map(value=>String(value??'').trim()));
+  loadScript(context,'prescription.js');
   loadScript(context,'storage.js');
   loadScript(context,'parser.js');
+  loadScript(context,'import-validator.js');
   loadScript(context,'importer.js');
+  loadScript(context,'program-store.js');
   context.initializeTrainingTracker(samplePlan,sampleWarmups);
   return context;
 }

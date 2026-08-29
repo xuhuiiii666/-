@@ -108,10 +108,7 @@ test('21. 修改单组处方是局部纯更新，不触发 rebuild',()=>{
   assert.equal(changed.setType,'top');assert.equal(rebuilds,0);
 });
 
-test('22. 标准模板下载生成三个固定工作表',()=>{
-  const app=boot();const names=[];let fileName='';
-  app.XLSX={utils:{book_new:()=>({}),aoa_to_sheet:rows=>({rows}),book_append_sheet:(book,sheet,name)=>{names.push(name);}},writeFile:(book,name)=>{fileName=name;}};
-  app.downloadStandardPlanTemplate();
-  assert.deepEqual(names,['填写说明','训练器数据_v1','组计划_v1']);
-  assert.equal(fileName,'训练器标准训练计划_v1.xlsx');
+test('22. Structured Import 不提供 Excel 模板生成器',()=>{
+  const app=boot();
+  assert.equal(typeof app.downloadStandardPlanTemplate,'undefined');
 });
