@@ -21,6 +21,16 @@
 
 Legacy Import 继续兼容徐晖旧版、肖悦旧版、`手机查看版_一日一格` 和旧逐日执行 Excel。
 
+Long-form Daily Grid 是独立适配路径，分流顺序为：
+
+```text
+Structured Import v1
+→ Long-form Daily Grid Adapter
+→ Legacy Import
+```
+
+Long-form 检测必须使用严格表头与内容特征，不能抢占已有 Legacy 文件。
+
 ## 2. 当前标准工作表
 
 当前官方 Excel 包含：
@@ -344,3 +354,25 @@ backoff -15%
 4. `IMPORT_CHANGELOG.md`
 
 无需更新其中某项时，交付报告必须说明原因。
+
+## 17. 当前能力边界
+
+Structured Import v1 当前可以表达：
+
+- 一行一个 Exercise。
+- 动作级 reps、RIR、重量、休息和时长默认处方。
+- `组计划_v1` 中的逐组 setType、reps、RIR、rest、重量调整和技术提示。
+- `alternating` 超级组、动作间过渡休息和轮间休息。
+- `trainingRole` 和 `targetDurationMin`。
+
+Structured Import v1 当前不能完整表达：
+
+- 独立 Activity 实体。
+- 攀岩路线、攀爬任务和多种计量单位的 Activity drills。
+- 单个 Set 内多个可独立记录的 segments。
+- 多阶段递减组每一段的 reps、RIR、降重范围和转换时间。
+- 富文本训练说明的结构化引用与原文回溯。
+
+以上能力当前只存在于 Long-form Daily Grid Adapter。`dropset` setType 不等于 multi-stage segments。不得为了宣称协议统一，把这些内容塞进备注或动作名称。
+
+后续如需统一，应另行设计 Structured Import v1.1 optional extension；本轮保持 v1 Sheet、列名、Schema 和现有母版不变。

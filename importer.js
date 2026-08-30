@@ -11,6 +11,10 @@ function ImportError(message,code,details){
 }
 ImportError.prototype=Object.create(Error.prototype);
 ImportError.prototype.constructor=ImportError;
+function ImportFormatError(message,code,details){ImportError.call(this,message,code||'IMPORT_FORMAT_INVALID',details);this.name='ImportFormatError';}
+ImportFormatError.prototype=Object.create(ImportError.prototype);ImportFormatError.prototype.constructor=ImportFormatError;
+function ImportValidationError(message,code,details){ImportError.call(this,message,code||'IMPORT_VALIDATION_FAILED',details);this.name='ImportValidationError';}
+ImportValidationError.prototype=Object.create(ImportError.prototype);ImportValidationError.prototype.constructor=ImportValidationError;
 function asImportError(error){return error instanceof ImportError?error:new ImportError(error&&error.message?error.message:String(error||'无法识别该训练计划。'),error&&error.code,error&&error.details||(error&&error.report?{report:error.report}:null));}
 
 function normalizeDash(s){ return String(s||'').replace(/[—]/g,'-').replace(/[–]/g,'-').replace(/×/g,'x').trim(); }
@@ -371,6 +375,9 @@ function importFormatB(rows, headerRow){
 function detectAndParseImport(text){
   var rows=parseDelimited(text);
   if(!rows.length) throw new ImportError('没有读取到有效内容。请复制包含表头的表格区域。','EMPTY_INPUT');
+  if(typeof detectLongFormDailyGrid==='function'&&detectLongFormDailyGrid(rows,'')){
+    return parseLongFormDailyGrid(rows,{fileName:'复制粘贴内容',sheetName:'复制粘贴'});
+  }
   return parseDailyGridSheet(rows, {id:'clipboard', label:'复制粘贴'});
 }
 
@@ -418,7 +425,7 @@ function scoreDailySheet(name, rows){
 }
 
 function findDailyExecutionSheet(workbook){
-  if(!workbook || !workbook.SheetNames) throw new ImportError('不是有效的 Excel 工作簿。','INVALID_WORKBOOK');
+  if(!workbook || !workbook.SheetNames) throw new ImportFormatError('不是有效的 Excel 工作簿。','INVALID_WORKBOOK');
   var candidates = [];
   for(var i=0;i<workbook.SheetNames.length;i++){
     var name = workbook.SheetNames[i];
@@ -428,7 +435,7 @@ function findDailyExecutionSheet(workbook){
   }
   candidates.sort(function(a,b){return b.score-a.score;});
   var best = candidates.find(function(c){ return c.score > 0 && !sheetNameBlocked(c.name); });
-  if(!best) throw new ImportError('没有找到逐日执行工作表。已跳过导航、说明、周总览、替代规则等页面。','DAILY_SHEET_NOT_FOUND');
+  if(!best) throw new ImportFormatError('没有找到逐日执行工作表。已跳过导航、说明、周总览、替代规则等页面。','DAILY_SHEET_NOT_FOUND');
   best.candidates = candidates.map(function(c){return c.name+'('+c.score+')';}).slice(0,8);
   return best;
 }
@@ -491,8 +498,17 @@ function parseWorkbookToImport(workbook, file){
       if(wbType.id !== 'unknown') planType = wbType;
     }
     var selected = findDailyExecutionSheet(workbook);
+    if(typeof detectLongFormDailyGrid==='function'&&detectLongFormDailyGrid(selected.rows,selected.name)){
+      var longForm=parseLongFormDailyGrid(selected.rows,{fileName:file&&file.name||'',sheetName:selected.name});
+      if(!longForm.validation||!longForm.validation.valid){
+        var semanticErrors=(longForm.validation&&longForm.validation.errors||[]).concat(longForm.semanticWarnings||[]);
+        throw new ImportValidationError('Long-form 训练计划存在未结构化内容或身份错误，请先查看语义损失警告。','LONG_FORM_SEMANTIC_LOSS',{report:{format:longForm.format,stats:longForm.semanticStats,warnings:longForm.semanticWarnings,errors:semanticErrors}});
+      }
+      longForm.candidates=selected.candidates;
+      return longForm;
+    }
     var parsed = parseDailyGridSheet(selected.rows, planType);
-    if(!parsed.validation||!parsed.validation.valid) throw new ImportError('训练计划校验失败。','VALIDATION_FAILED');
+    if(!parsed.validation||!parsed.validation.valid) throw new ImportValidationError('训练计划校验失败。','VALIDATION_FAILED');
     parsed.sheetName = selected.name;
     parsed.source = 'file';
     parsed.sourceFileName=file&&file.name||'';
@@ -528,7 +544,68 @@ function previewImportPlan(){
     out.textContent='识别失败：'+e.message;
   }
 }
+function importUtf8Bytes(value){
+  var source=String(value===undefined||value===null?'':value);
+  if(typeof TextEncoder!=='undefined') return new TextEncoder().encode(source).length;
+  try{return unescape(encodeURIComponent(source)).length;}catch(ignore){return source.length;}
+}
+function formatImportMegabytes(bytes){return (Math.max(0,Number(bytes)||0)/1000000).toFixed(2)+' MB';}
+function programFromParsedImport(parsed){
+  if(!parsed||!parsed.plan||!parsed.plan.length) throw new ImportError('请先成功预览训练计划。','NO_PREVIEW');
+  var importSource=parsed.format==='structured-v1'?'structured-v1':(parsed.format==='long-form-daily-v1'?'long-form-daily-v1':'excel');
+  var program=typeof createProgramFromPlan==='function'&&typeof normalizeProgram==='function'
+    ?createProgramFromPlan(parsed.plan,{name:parsed.programName||parsed.sourceFileName||'导入训练计划',source:importSource,sourceFileName:parsed.sourceFileName||''})
+    :{name:parsed.programName||parsed.sourceFileName||'导入训练计划',source:importSource,sourceFileName:parsed.sourceFileName||'',days:parsed.plan.slice()};
+  program.warmupDefinitions=(parsed.warmups||[]).slice();
+  if(parsed.format==='long-form-daily-v1'){
+    program.sharedSourceBlocks=Object.assign({},parsed.sharedSourceBlocks||{});
+    program.importSemanticStats=Object.assign({},parsed.semanticStats||{});
+    program.importFormat='long-form-daily-v1';
+  }
+  return program;
+}
+function estimateImportStorage(parsed){
+  var program=programFromParsedImport(parsed),programBytes=importUtf8Bytes(JSON.stringify(program));
+  var usage=typeof estimateStorageUsage==='function'?estimateStorageUsage():null;
+  var currentRootBytes=usage&&Number(usage.rootBytes)||0;
+  if(!currentRootBytes&&typeof localStorage!=='undefined'){
+    try{currentRootBytes=importUtf8Bytes(localStorage.getItem('training-tracker-state')||'');}catch(ignore){}
+  }
+  var estimatedAfterBytes=currentRootBytes+programBytes;
+  var warningLevel=estimatedAfterBytes>=8000000?'strong':(estimatedAfterBytes>=4000000?'warning':'normal');
+  return {program:program,programBytes:programBytes,currentRootBytes:currentRootBytes,estimatedAfterBytes:estimatedAfterBytes,warningLevel:warningLevel};
+}
+function importStorageEstimateLines(parsed){
+  var estimate=estimateImportStorage(parsed),lines=[
+    '预计 Program 大小：约 '+formatImportMegabytes(estimate.programBytes),
+    '当前 ROOT：约 '+formatImportMegabytes(estimate.currentRootBytes),
+    '导入后预计：约 '+formatImportMegabytes(estimate.estimatedAfterBytes)
+  ];
+  if(estimate.warningLevel==='warning')lines.push('容量提醒：预计体积较大，请先保留原始存档；各浏览器实际配额不同。');
+  if(estimate.warningLevel==='strong')lines.push('强容量提醒：预计体积很大，写入可能失败；实际以浏览器保存结果为准。');
+  return {estimate:estimate,lines:lines};
+}
 function importPrecheckText(parsed,fileName){
+  if(parsed&&parsed.format==='long-form-daily-v1'){
+    var semantic=parsed.semanticStats||{},types=semantic.types||{};
+    var lines=[
+      '文件：'+(fileName||parsed.sourceFileName||''),
+      '格式：Long-form Daily Grid｜语义适配 v1',
+      'Workout：'+(semantic.workouts||0),
+      '力量训练：'+(types['力量训练']||0)+'｜力量＋有氧：'+(types['力量＋有氧']||0)+'｜完全休息：'+(types['完全休息']||0),
+      '攀岩：'+(types['攀岩']||0)+'｜减载训练：'+(types['减载训练']||0)+'｜减载攀岩：'+(types['减载攀岩']||0),
+      '正式动作：'+(semantic.formalExercises||0)+'｜热身模块：'+(semantic.warmups||0)+'｜技能保留动作：'+(semantic.skillRetention||0),
+      '超级组：'+(semantic.supersetGroups||0)+'｜多阶段递减组：'+(semantic.multiStageDropSets||0),
+      '有氧活动：'+(semantic.cardio||0)+'｜攀岩活动：'+(semantic.climbing||0),
+      '未识别内容块：'+(semantic.unrecognizedBlocks||0)
+    ];
+    (parsed.semanticWarnings||[]).forEach(function(item){lines.push('语义损失警告：'+item);});
+    var validation=parsed.validation||{},errors=validation.errors||[],warnings=(validation.warnings||[]).concat(parsed.semanticWarnings||[]);
+    lines.push('validation：'+errors.length+' errors / '+warnings.length+' warnings');
+    lines=lines.concat(importStorageEstimateLines(parsed).lines);
+    lines.push((semantic.unrecognizedBlocks||0)?'严重错误：'+semantic.unrecognizedBlocks:'✓ 未发现语义损失');
+    return lines.join('\n');
+  }
   var report=parsed&&parsed.report;
   if(!report){
     return '文件：'+(fileName||parsed&&parsed.sourceFileName||'粘贴内容')+'\n格式：Legacy 兼容格式\n✓ 旧版解析成功\n训练日：'+((parsed&&parsed.plan&&parsed.plan.length)||0)+'\n严重错误：0';
@@ -545,14 +622,17 @@ function renderImportPrecheck(parsed,fileName,error){
   var report=error&&(error.report||(error.details&&error.details.report));
   if(error&&report) parsed={report:report,sourceFileName:fileName||''};
   box.textContent=error&&!report?('文件：'+(fileName||'')+'\n识别失败：'+(error.message||error)+'\n严重错误：1'):importPrecheckText(parsed,fileName);
+  var storageEstimate=null;
+  if(!error&&parsed&&parsed.format==='long-form-daily-v1'){
+    try{storageEstimate=estimateImportStorage(parsed);}catch(ignore){}
+  }
   box.classList.toggle('blocked',!!error||!!(report&&report.errors&&report.errors.length));
+  box.classList.toggle('storageWarning',!!storageEstimate&&storageEstimate.warningLevel==='warning');
+  box.classList.toggle('storageStrongWarning',!!storageEstimate&&storageEstimate.warningLevel==='strong');
 }
 function programFromImportPreview(){
   if(!lastImportPreview) previewImportPlan();
-  if(!lastImportPreview || !lastImportPreview.plan || !lastImportPreview.plan.length) throw new ImportError('请先成功预览训练计划。','NO_PREVIEW');
-  var program=createProgramFromPlan(lastImportPreview.plan,{name:lastImportPreview.programName||lastImportPreview.sourceFileName||'导入训练计划',source:lastImportPreview.format==='structured-v1'?'structured-v1':'excel',sourceFileName:lastImportPreview.sourceFileName||''});
-  program.warmupDefinitions=(lastImportPreview.warmups||[]).slice();
-  return program;
+  return programFromParsedImport(lastImportPreview);
 }
 function refreshAfterProgramImport(message){
   state=getActiveProgram();PLAN=state.days;WARMUPS=(state.warmupDefinitions&&state.warmupDefinitions.length)?state.warmupDefinitions:(trainingTrackerState.builtinWarmups||BUILTIN_WARMUPS);

@@ -76,9 +76,9 @@ test('H7. QuotaExceededError 被单独识别',()=>{
 
 test('H8. 导入 Program 遇到 quota 时当前根状态与 activeProgram 不变',()=>{
   const source=rootFixture(),raw=JSON.stringify(source),storage=new QuotaStorage({'training-tracker-state':raw},raw.length+20),app=loadStorage(storage);app.initializeTrainingTracker(samplePlan,sampleWarmups);
-  const beforeActive=app.trainingTrackerState.activeProgramId;
+  const beforeRuntime=JSON.stringify(app.trainingTrackerState),beforeActive=app.trainingTrackerState.activeProgramId,beforeProgram=JSON.stringify(app.getActiveProgram());
   assert.throws(()=>app.addProgram(app.normalizeProgram({name:'新计划',days:Array.from({length:20},(_,i)=>workout('N'+i))}),true),error=>error&&error.code==='STORAGE_QUOTA_EXCEEDED');
-  assert.equal(app.trainingTrackerState.activeProgramId,beforeActive);assert.equal(storage.getItem('training-tracker-state'),raw);
+  assert.equal(app.trainingTrackerState.activeProgramId,beforeActive);assert.equal(JSON.stringify(app.trainingTrackerState),beforeRuntime);assert.equal(JSON.stringify(app.getActiveProgram()),beforeProgram);assert.equal(storage.getItem('training-tracker-state'),raw);
 });
 
 test('H9. currentWorkoutId 优先于旧 currentIndex 恢复当前训练',()=>{

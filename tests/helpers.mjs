@@ -60,6 +60,8 @@ export function loadImporter(storage=new MemoryStorage()){
   loadScript(context,'date-integrity.js');
   loadScript(context,'execution-reconciler.js');
   loadScript(context,'parser.js');
+  loadScript(context,'section-parser.js');
+  loadScript(context,'long-form-daily-adapter.js');
   loadScript(context,'import-validator.js');
   loadScript(context,'plan-compiler.js');
   loadScript(context,'importer.js');
@@ -76,6 +78,8 @@ export function loadTrainingModules(storage=new MemoryStorage()){
   loadScript(context,'storage.js');
   loadScript(context,'parser.js');
   loadScript(context,'history.js');
+  loadScript(context,'section-parser.js');
+  loadScript(context,'long-form-daily-adapter.js');
   loadScript(context,'import-validator.js');
   loadScript(context,'plan-compiler.js');
   loadScript(context,'importer.js');

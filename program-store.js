@@ -215,6 +215,7 @@
   }
   function createStandardProgram(report,file){
     if(!report||asArray(report.errors).length){
+      if(typeof global.ImportValidationError==='function') throw new global.ImportValidationError('Structured Import v1 校验失败，没有修改当前训练计划。','STRUCTURED_VALIDATION_FAILED',{report:report});
       if(typeof global.ImportError==='function') throw new global.ImportError('Structured Import v1 校验失败，没有修改当前训练计划。','STRUCTURED_VALIDATION_FAILED',{report:report});
       var error=new Error('Structured Import v1 校验失败，没有修改当前训练计划。');
       error.name='ImportError';error.code='STRUCTURED_VALIDATION_FAILED';error.report=report;error.details={report:report};throw error;

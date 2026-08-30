@@ -72,7 +72,7 @@ test('16. 没有组计划工作表时自动生成普通工作组',()=>{
 test('17. Structured 严重错误阻止导入且当前 Program 不变',()=>{
   const app=boot();const before=JSON.stringify(app.trainingTrackerState);
   const broken=dataRows.map(row=>row.slice());broken[2][broken[0].indexOf('RIR上限')]='20';
-  assert.throws(()=>app.parseWorkbookToImport(workbook(false,broken),{name:'错误.xlsx'}),error=>error.name==='ImportError'&&error.code==='STRUCTURED_VALIDATION_FAILED');
+  assert.throws(()=>app.parseWorkbookToImport(workbook(false,broken),{name:'错误.xlsx'}),error=>error.name==='ImportValidationError'&&error.code==='STRUCTURED_VALIDATION_FAILED');
   assert.equal(JSON.stringify(app.trainingTrackerState),before);
 });
 

@@ -40,12 +40,14 @@ exercises
 
 ```text
 plannedDate
+type
 targetDurationMin
-notes
+instructions
 supersets
+activities
 ```
 
-`plannedDate` 使用 `YYYY-MM-DD`。`targetDurationMin` 使用分钟，只表达规划方已经确定的目标时长。
+`plannedDate` 使用 `YYYY-MM-DD`。`targetDurationMin` 使用分钟，只表达规划方已经确定的目标时长。`instructions` 保存完整执行说明，不应伪装成 Exercise。
 
 ## 3. Exercise
 
@@ -68,6 +70,7 @@ rirMin
 rirMax
 restMinSec
 restMaxSec
+techniqueCue
 ```
 
 可选字段：
@@ -110,7 +113,7 @@ skill-retention
 
 ## 4. Set Prescription
 
-只有同一动作的某些组与动作默认处方不同时，才提供 `setPrescriptions`。
+只有同一动作的某些组与动作默认处方不同时，才提供 `setPrescriptions`。规划方可以逐组提供不同的 reps、RIR、rest 和 setType；这些值按组保存，不能压成动作级单一值。
 
 每个特殊组必须提供：
 
@@ -187,7 +190,7 @@ setPrescriptions:
     techniqueCue: 减重约15%，保持动作质量
 ```
 
-## 5. Superset
+## 5. Sequence / Superset
 
 交替超级组放在所属 Workout 的 `supersets` 中。
 
@@ -219,7 +222,48 @@ alternating
 
 训练规划 AI 不需要提供 `超级组ID`。Codex 按工作簿顺序自动生成 `SS01`、`SS02`。
 
-## 6. 训练规划 AI 不维护的技术字段
+## 6. Activity
+
+不适合表达为重量训练 Exercise 的任务使用 Activity。支持的内容语义包括：
+
+```text
+activityType: cardio | climbing | skill | recovery
+title
+durationMinSec
+durationMaxSec
+rpeMin
+rpeMax
+measureMin
+measureMax
+measureUnit
+modalityOptions
+instruction
+drills
+```
+
+按实际内容提供字段即可。时间使用秒；攀岩路线数量等计量必须同时提供 `measureUnit`。Activity 不生成虚假的重量训练动作或组数。
+
+当前 Long-form Daily Grid Adapter 可以直接承载 Activity。Structured Import v1 尚未定义 Activity Sheet 或列；需要输出标准 Excel 时，不得把 Activity 强塞进动作备注，等待后续 Structured Import v1.1 optional extension。
+
+## 7. Multi-stage Set
+
+递减组等单组内多阶段执行内容使用 `segments`：
+
+```text
+segments
+  label
+  repsMin / repsMax
+  rirMin / rirMax
+  loadAdjustmentType
+  loadAdjustmentMin / loadAdjustmentMax
+  transitionMinSec / transitionMaxSec
+```
+
+每个 segment 独立保存实际重量、次数和 RIR。训练规划 AI 负责给出执行顺序和处方，Codex 负责生成 segment 技术身份。
+
+当前 Long-form Daily Grid Adapter 可以表达 multi-stage set。Structured Import v1 的 `dropset` 只表示 Set 类型，不能完整表达多段处方；本轮不扩展 Structured v1。
+
+## 8. 训练规划 AI 不维护的技术字段
 
 外部训练规划 AI 不需要维护：
 
@@ -230,6 +274,7 @@ workoutId
 exerciseId
 setId
 超级组ID
+supersetId
 Sheet 名称
 Excel 列顺序
 Structured Import 内部字段映射
@@ -237,7 +282,7 @@ Structured Import 内部字段映射
 
 这些字段全部由 Codex 转换层和训练器负责。
 
-## 7. 纯文本交接
+## 9. 纯文本交接
 
 用户可以直接提供结构化 Markdown、YAML-like 文本或 JSON，不需要手工编辑 Excel。
 
@@ -255,7 +300,7 @@ Structured Import 内部字段映射
 
 `plan-compiler.js` 直接接受对象或 JSON 文本。Markdown / YAML-like 文本由 Codex 读取并按本文档归一化；编译器不做自然语言训练学推断。
 
-## 8. 最小完整示例
+## 10. 最小完整示例
 
 以下只展示内容结构，不是默认训练计划：
 
@@ -318,7 +363,14 @@ workouts:
 
 Codex 会自动生成 `W001`、`W001-E01` 至 `W001-E04` 和 `SS01`，再生成最新版 Excel 并运行 Structured Import validation。
 
-## 9. 禁止的转换行为
+## 11. 当前转换能力边界
+
+- Structured Import v1：Exercise、动作级默认处方、逐组 Set Prescription、`alternating` Superset、技术提示和目标时长。
+- Long-form Daily Grid Adapter：在以上执行语义之外，还支持 Activity、逐组 RIR 序列、多阶段递减组、丰富说明、攀岩、有氧和恢复任务。
+- `plan-compiler.js` 当前输出 Structured Import v1，因此不得假装已经输出 Activity 或 multi-stage segments。
+- 后续如需统一协议，应单独设计 Structured Import v1.1 optional extension，并保持 v1 文件继续合法。
+
+## 12. 禁止的转换行为
 
 Codex 和 `plan-compiler.js` 不得根据动作名称推断：
 
