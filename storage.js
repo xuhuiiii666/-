@@ -451,6 +451,19 @@
     if(LEGACY_KEYS.indexOf(key)<0)throw new Error('不是训练器允许导出的 Legacy key。');
     return downloadRawStorageKey(key,key+'-原始存档.json');
   }
+  function deleteMigratedLegacyData(){
+    var rootBefore=localStorage.getItem(ROOT_KEY);
+    if(rootBefore===null)throw new Error('当前 ROOT 不存在，不能删除 Legacy 迁移来源。');
+    try{var parsed=JSON.parse(rootBefore);if(!parsed||!parsed.profiles)throw new Error('ROOT 无效');}catch(error){throw new Error('当前 ROOT 无法通过完整性检查，不能删除 Legacy 数据。');}
+    var existing=LEGACY_KEYS.filter(function(key){return localStorage.getItem(key)!==null;});
+    var releasedBytes=existing.reduce(function(total,key){return total+utf8Bytes(localStorage.getItem(key)||'');},0);
+    if(!existing.length)return {deleted:false,removedKeys:[],releasedBytes:0,usage:estimateStorageUsage()};
+    var releasedLabel=(releasedBytes/(1024*1024)).toFixed(2)+' MiB';
+    if(!confirm('确认删除已迁移 Legacy 数据？\n预计释放约 '+releasedLabel+'。\n不会删除当前 Program、训练日志或历史重量。'))return null;
+    existing.forEach(function(key){localStorage.removeItem(key);});
+    if(localStorage.getItem(ROOT_KEY)!==rootBefore)throw new StateIntegrityError('Legacy 清理校验失败：ROOT 发生变化。');
+    return {deleted:true,removedKeys:existing,releasedBytes:releasedBytes,usage:estimateStorageUsage()};
+  }
   function deletePreV6Backup(){if(!localStorage.getItem(PRE_V6_BACKUP_KEY))return false;if(!confirm('确认删除本机升级前快照？请先导出该备份。'))return false;localStorage.removeItem(PRE_V6_BACKUP_KEY);return true;}
   function restorePreV6Backup(){
     var text=localStorage.getItem(PRE_V6_BACKUP_KEY);if(!text)throw new Error('没有找到升级前本地数据。');
@@ -560,6 +573,8 @@
   global.exportRawTrainingState=exportRawTrainingState;
   global.exportRawPreV6Backup=exportRawPreV6Backup;
   global.exportRawLegacyStorageKey=exportRawLegacyStorageKey;
+  global.deleteMigratedLegacyData=deleteMigratedLegacyData;
+  global.TRAINING_TRACKER_LEGACY_KEYS=LEGACY_KEYS.slice();
   global.deletePreV6Backup=deletePreV6Backup;
   global.collectStateIntegrityStats=collectStateIntegrityStats;
   global.validateMigratedState=validateMigratedState;

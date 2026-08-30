@@ -622,6 +622,14 @@ function renderImportPrecheck(parsed,fileName,error){
   var report=error&&(error.report||(error.details&&error.details.report));
   if(error&&report) parsed={report:report,sourceFileName:fileName||''};
   box.textContent=error&&!report?('文件：'+(fileName||'')+'\n识别失败：'+(error.message||error)+'\n严重错误：1'):importPrecheckText(parsed,fileName);
+  var previewProgram=null,exactDuplicate=null,similarSource=null;
+  if(!error&&parsed){
+    try{previewProgram=programFromParsedImport(parsed);}catch(ignore){}
+    if(previewProgram&&typeof findDuplicateImportedProgram==='function')exactDuplicate=findDuplicateImportedProgram(previewProgram);
+    if(!exactDuplicate&&typeof findImportedProgramBySource==='function')similarSource=findImportedProgramBySource(parsed.sourceFileName||fileName||'',(parsed.plan||[]).length);
+  }
+  if(exactDuplicate)box.textContent+='\n提醒：当前已存在内容完全一致的计划：'+(exactDuplicate.name||exactDuplicate.sourceFileName||'未命名计划')+'。不会自动覆盖或重复创建。';
+  else if(similarSource)box.textContent+='\n提醒：当前已存在同名且 Workout 数量相同的计划，但内容不一定相同。确认后仍可导入为新的 Program，不会自动覆盖。';
   var storageEstimate=null;
   if(!error&&parsed&&parsed.format==='long-form-daily-v1'){
     try{storageEstimate=estimateImportStorage(parsed);}catch(ignore){}
@@ -636,32 +644,50 @@ function programFromImportPreview(){
 }
 function refreshAfterProgramImport(message){
   state=getActiveProgram();PLAN=state.days;WARMUPS=(state.warmupDefinitions&&state.warmupDefinitions.length)?state.warmupDefinitions:(trainingTrackerState.builtinWarmups||BUILTIN_WARMUPS);
-  autoSeedTemplatesFromPlan();
-  try{saveState();}catch(error){
-    if(typeof isStorageQuotaError==='function'&&isStorageQuotaError(error)){console.error('导入后的模板沉淀未保存',error);showToast('训练计划已保存，但动作模板更新因存储空间不足未保存');}
-    else throw error;
+  var canonicalRootSnapshot=JSON.parse(JSON.stringify(trainingTrackerState)),templateWarning='';
+  try{autoSeedTemplatesFromPlan();}catch(error){
+    console.error('导入后的模板沉淀未保存',error);
+    if(typeof bindTrainingRuntime==='function')bindTrainingRuntime(canonicalRootSnapshot);
+    state=getActiveProgram();PLAN=state.days;WARMUPS=(state.warmupDefinitions&&state.warmupDefinitions.length)?state.warmupDefinitions:(trainingTrackerState.builtinWarmups||BUILTIN_WARMUPS);
+    templateWarning=(typeof isStorageQuotaError==='function'&&isStorageQuotaError(error))?'训练计划已保存，但动作模板更新因存储空间不足未保存。':'训练计划已保存，但动作模板自动更新失败。';
   }
-  rebuild();renderCalendar();renderHistory();alert(message);showTab('today');
+  rebuild();renderCalendar();renderHistory();alert(message+(templateWarning?'\n'+templateWarning:''));showTab('today');
+  if(templateWarning)showToast(templateWarning);
 }
 function importApplyErrorMessage(error){
   if(typeof isStorageQuotaError==='function'&&isStorageQuotaError(error)) return '训练计划已经识别成功，但浏览器本地存储空间不足，因此没有保存新计划。当前计划未修改。';
   return '无法识别该训练计划，没有修改当前训练计划。\n'+(error&&error.message?error.message:error);
 }
 function applyImportPlan(){
+  var committed=false;
   try{
     var program=programFromImportPreview();
-    if(!confirm('确认把“'+program.name+'”导入为新的训练计划？现有训练计划和记录不会被覆盖。')) return;
-    addProgram(program,true);
-    refreshAfterProgramImport('已导入为新的训练计划：'+program.days.length+'天。');
-  }catch(error){console.error('导入训练计划失败',error);alert(importApplyErrorMessage(error));}
+    var exactDuplicate=typeof findDuplicateImportedProgram==='function'?findDuplicateImportedProgram(program):null;
+    if(exactDuplicate){alert('当前已存在内容完全一致的计划：'+(exactDuplicate.name||exactDuplicate.sourceFileName||'未命名计划')+'。没有重复创建，也没有覆盖现有计划。');return;}
+    var similarSource=typeof findImportedProgramBySource==='function'?findImportedProgramBySource(program.sourceFileName,(program.days||[]).length):null;
+    var confirmText=similarSource?'当前已存在同名且 Workout 数量相同的计划，但内容不同。确认仍导入为新的 Program？不会覆盖现有计划。':'确认把“'+program.name+'”导入为新的训练计划？现有训练计划和记录不会被覆盖。';
+    if(!confirm(confirmText)) return;
+    var result=typeof addImportedProgram==='function'?addImportedProgram(program,true):{created:true,program:addProgram(program,true)};
+    if(!result.created){alert('当前已存在来源相同的计划：'+(result.program.name||result.program.sourceFileName||'未命名计划')+'。没有重复创建，也没有覆盖现有计划。');return;}
+    committed=true;
+    refreshAfterProgramImport('已导入为新的训练计划：'+result.program.days.length+'天。');
+  }catch(error){
+    console.error(committed?'导入已保存，但后续页面刷新失败':'导入训练计划失败',error);
+    alert(committed?('训练计划已保存，但页面刷新失败。请刷新页面后继续使用。\n'+(error&&error.message?error.message:error)):importApplyErrorMessage(error));
+  }
 }
 function replaceCurrentWithImportPlan(){
+  var committed=false;
   try{
     var program=programFromImportPreview();
     if(!confirm('确认替换当前训练计划？当前计划中的训练日、草稿和日志会被新的计划替换。其他训练计划不受影响。')) return;
     replaceActiveProgram(program);
+    committed=true;
     refreshAfterProgramImport('已替换当前训练计划：'+program.days.length+'天。');
-  }catch(error){console.error('替换训练计划失败',error);alert(importApplyErrorMessage(error));}
+  }catch(error){
+    console.error(committed?'替换已保存，但后续页面刷新失败':'替换训练计划失败',error);
+    alert(committed?('训练计划已保存，但页面刷新失败。请刷新页面后继续使用。\n'+(error&&error.message?error.message:error)):importApplyErrorMessage(error));
+  }
 }
 function resetImportedPlan(){
   if(!confirm('确认恢复示例计划？示例计划会作为新的训练计划加入，不覆盖当前训练日志。')) return;

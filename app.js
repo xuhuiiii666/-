@@ -2511,7 +2511,8 @@ function renderStorageMaintenance(){
   if(legacyActions){
     var existingLegacy=Object.keys(report.legacy||{}).filter(function(key){return report.legacy[key]&&report.legacy[key].exists;});
     legacyActions.classList.toggle('hidden',!existingLegacy.length);
-    legacyActions.innerHTML=existingLegacy.map(function(key){return '<button type="button" data-storage-key="'+escapeHtml(key)+'" onclick="exportLegacyKeyFromSettings(this.dataset.storageKey)">导出 Legacy：'+escapeHtml(key)+'</button>';}).join('');
+    legacyActions.innerHTML=existingLegacy.map(function(key){return '<button type="button" data-storage-key="'+escapeHtml(key)+'" onclick="exportLegacyKeyFromSettings(this.dataset.storageKey)">导出 Legacy：'+escapeHtml(key)+'</button>';}).join('')
+      +(existingLegacy.length?'<div class="small" style="flex-basis:100%">已完成外部备份并确认迁移后，可删除这五个白名单 Legacy key。预计释放约 '+escapeHtml((usage.legacyBytes/(1024*1024)).toFixed(2))+' MiB；不会删除当前 Program、训练日志或历史重量。</div><button type="button" class="bad" onclick="deleteMigratedLegacyFromSettings()">删除已迁移 Legacy 数据</button>':'');
   }
 }
 var dateRepairPreview=null;
@@ -2560,6 +2561,7 @@ function renderSettings(){
 function exportRawStateFromSettings(){try{exportRawTrainingState();showToast('已导出原始本地存档');}catch(error){console.error('导出原始本地存档失败',error);alert('导出失败：'+(error.message||error));}}
 function exportPreV6FromSettings(){try{exportRawPreV6Backup();showToast('已导出升级前原始备份');}catch(error){console.error('导出升级前备份失败',error);alert('导出失败：'+(error.message||error));}}
 function exportLegacyKeyFromSettings(key){try{exportRawLegacyStorageKey(key);showToast('已导出 Legacy 原始数据');}catch(error){console.error('导出 Legacy 原始数据失败',error);alert('导出失败：'+(error.message||error));}}
+function deleteMigratedLegacyFromSettings(){try{var result=deleteMigratedLegacyData();if(!result)return;renderSettings();showToast(result.deleted?('已删除 Legacy 数据，释放 '+formatStorageBytes(result.releasedBytes)):'没有可删除的 Legacy 数据');}catch(error){console.error('删除 Legacy 数据失败',error);alert('删除失败：'+(error.message||error));}}
 function deletePreV6FromSettings(){try{if(deletePreV6Backup()){renderSettings();showToast('已删除本机升级前快照');}}catch(error){console.error('删除升级前备份失败',error);alert('删除失败：'+(error.message||error));}}
 function saveSettings(){state.startDate=document.getElementById('startDate').value;state.currentIndex=parseInt(document.getElementById('currentIndex').value)||0;state.settings.mainRest=parseInt(document.getElementById('mainRest').value)||180;state.settings.assistRest=parseInt(document.getElementById('assistRest').value)||90;saveState();rebuild();alert('设置已保存。');}
 function restoreUpgradeBackupFromSettings(){

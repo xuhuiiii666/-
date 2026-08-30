@@ -39,6 +39,60 @@
     commitCandidate(root);
     return next;
   }
+  function normalizedSourceFileName(value){
+    value=text(value);
+    try{value=value.normalize('NFKC');}catch(ignore){}
+    return value.replace(/\\/g,'/').split('/').pop().replace(/\s+/g,' ').toLowerCase();
+  }
+  function normalizedFingerprintValue(value,key){
+    var ignored={programId:1,workoutId:1,exerciseId:1,setId:1,createdAt:1,updatedAt:1,timerEndAt:1,timerState:1,remaining:1,completed:1};
+    if(ignored[key])return undefined;
+    if(Array.isArray(value))return value.map(function(item){return normalizedFingerprintValue(item,'');});
+    if(value&&typeof value==='object'){
+      var next={};Object.keys(value).sort().forEach(function(childKey){var child=normalizedFingerprintValue(value[childKey],childKey);if(child!==undefined)next[childKey]=child;});return next;
+    }
+    if(typeof value==='string'){
+      try{value=value.normalize('NFKC');}catch(ignore){}
+      return value.replace(/\r\n?/g,'\n').split('\n').map(function(line){return line.replace(/\s+$/g,'');}).join('\n').trim();
+    }
+    return value;
+  }
+  function fingerprintHash(textValue){
+    var h1=2166136261,h2=2246822507;
+    for(var index=0;index<textValue.length;index++){
+      var code=textValue.charCodeAt(index);h1=Math.imul(h1^code,16777619);h2=Math.imul(h2^code,3266489917);
+    }
+    return ('00000000'+(h1>>>0).toString(16)).slice(-8)+('00000000'+(h2>>>0).toString(16)).slice(-8);
+  }
+  function programContentFingerprint(program){
+    var payload={days:asArray(program&&program.days),warmupDefinitions:asArray(program&&program.warmupDefinitions),sharedSourceBlocks:program&&program.sharedSourceBlocks||{},importFormat:text(program&&program.importFormat)};
+    var canonical=JSON.stringify(normalizedFingerprintValue(payload,''));
+    return {hash:fingerprintHash(canonical),canonical:canonical};
+  }
+  function findImportedProgramBySource(sourceFileName,workoutCount,root){
+    var fileKey=normalizedSourceFileName(sourceFileName);if(!fileKey)return null;
+    var profile=global.getActiveProfile(root||global.trainingTrackerState);if(!profile)return null;
+    var expectedCount=Number(workoutCount);
+    var programs=profile.programs||{};
+    return Object.keys(programs).map(function(programId){return programs[programId];}).find(function(program){
+      if(normalizedSourceFileName(program&&program.sourceFileName)!==fileKey)return false;
+      return !isFinite(expectedCount)||expectedCount<0||asArray(program&&program.days).length===expectedCount;
+    })||null;
+  }
+  function findDuplicateImportedProgram(program,root){
+    if(!program)return null;
+    var profile=global.getActiveProfile(root||global.trainingTrackerState);if(!profile)return null;
+    var candidate=programContentFingerprint(program),programs=profile.programs||{};
+    return Object.keys(programs).map(function(programId){return programs[programId];}).find(function(existing){
+      var fingerprint=programContentFingerprint(existing);
+      return fingerprint.hash===candidate.hash&&fingerprint.canonical===candidate.canonical;
+    })||null;
+  }
+  function addImportedProgram(program,activate){
+    var existing=findDuplicateImportedProgram(program);
+    if(existing)return {created:false,program:existing,existingProgram:existing};
+    return {created:true,program:addProgram(program,activate),existingProgram:null};
+  }
   function uniqueWorkoutMap(days){
     var grouped={};asArray(days).forEach(function(day,index){var key=text(day&&day.sourceWorkoutKey);if(!key)return;(grouped[key]=grouped[key]||[]).push({day:day,index:index});});
     var unique={};Object.keys(grouped).forEach(function(key){if(grouped[key].length===1)unique[key]=grouped[key][0];});return unique;
@@ -227,6 +281,10 @@
 
   global.createProgramFromPlan=createProgramFromPlan;
   global.addProgram=addProgram;
+  global.findImportedProgramBySource=findImportedProgramBySource;
+  global.programContentFingerprint=programContentFingerprint;
+  global.findDuplicateImportedProgram=findDuplicateImportedProgram;
+  global.addImportedProgram=addImportedProgram;
   global.replaceActiveProgram=replaceActiveProgram;
   global.mergeReplacementProgramState=mergeReplacementProgramState;
   global.activateProgram=activateProgram;
