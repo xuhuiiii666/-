@@ -15,10 +15,19 @@
     if(typeof global.saveRootCandidate!=='function') throw new Error('训练器存储边界尚未初始化。');
     return global.saveRootCandidate(root);
   }
+  function withSourceWorkoutKeys(days,source){
+    return copy(days||[]).map(function(day,index){
+      day=day||{};
+      if(!day.source)day.source=source||'imported';
+      if(!day.sourceWorkoutKey&&typeof global.deriveSourceWorkoutKey==='function')day.sourceWorkoutKey=global.deriveSourceWorkoutKey(day,index,day.source||source);
+      return day;
+    });
+  }
 
   function createProgramFromPlan(days,options){
     options=options||{};
-    return global.normalizeProgram({programId:options.programId,name:options.name||options.sourceFileName||'导入训练计划',source:options.source||'imported',sourceFileName:options.sourceFileName||'',days:copy(days||[])},options);
+    var source=options.source||'imported';
+    return global.normalizeProgram({programId:options.programId,name:options.name||options.sourceFileName||'导入训练计划',source:source,sourceFileName:options.sourceFileName||'',days:withSourceWorkoutKeys(days,source)},options);
   }
   function addProgram(program,activate){
     var currentRoot=global.trainingTrackerState;
@@ -30,13 +39,53 @@
     commitCandidate(root);
     return next;
   }
+  function uniqueWorkoutMap(days){
+    var grouped={};asArray(days).forEach(function(day,index){var key=text(day&&day.sourceWorkoutKey);if(!key)return;(grouped[key]=grouped[key]||[]).push({day:day,index:index});});
+    var unique={};Object.keys(grouped).forEach(function(key){if(grouped[key].length===1)unique[key]=grouped[key][0];});return unique;
+  }
+  function mapExecutionField(oldProgram,nextProgram,field,oldMap,newMap){
+    var source=oldProgram[field]||{},target={};
+    Object.keys(source).forEach(function(oldWorkoutId){
+      var oldEntry=oldMap.byId[oldWorkoutId];if(!oldEntry)return;
+      var match=newMap.bySource[text(oldEntry.day.sourceWorkoutKey)];if(!match)return;
+      target[match.day.workoutId]=copy(source[oldWorkoutId]);
+      if(field==='currentWorkoutDrafts'&&target[match.day.workoutId]){target[match.day.workoutId].workoutId=match.day.workoutId;target[match.day.workoutId].planIndex=match.index;}
+    });
+    nextProgram[field]=target;
+  }
+  function replacementMaps(days){
+    var byId={};asArray(days).forEach(function(day,index){if(day&&day.workoutId)byId[day.workoutId]={day:day,index:index};});return {byId:byId,bySource:uniqueWorkoutMap(days)};
+  }
+  function mergeReplacementProgramState(oldProgram,newProgram){
+    var next=copy(newProgram),oldMap=replacementMaps(oldProgram.days),newMap=replacementMaps(next.days);
+    next.workoutLogs=copy(asArray(oldProgram.workoutLogs));
+    ['actualDates','dateAnchors','completed','currentWorkoutDrafts','sessionStartedAt','endReminderFlags'].forEach(function(field){mapExecutionField(oldProgram,next,field,oldMap,newMap);});
+    next.customWarmups={};
+    Object.keys(oldProgram.customWarmups||{}).forEach(function(key){
+      var match=key.match(/^workout_(.+)$/);if(!match){next.customWarmups[key]=copy(oldProgram.customWarmups[key]);return;}
+      var oldEntry=oldMap.byId[match[1]],newEntry=oldEntry&&newMap.bySource[text(oldEntry.day.sourceWorkoutKey)];if(newEntry)next.customWarmups['workout_'+newEntry.day.workoutId]=copy(oldProgram.customWarmups[key]);
+    });
+    ['settings','currentSessionNote','noteArchive','keepNoteForNext','startDate'].forEach(function(field){if(oldProgram[field]!==undefined)next[field]=copy(oldProgram[field]);});
+    var oldCurrent=oldMap.byId[oldProgram.currentWorkoutId],newCurrent=oldCurrent&&newMap.bySource[text(oldCurrent.day.sourceWorkoutKey)];
+    if(newCurrent){next.currentIndex=newCurrent.index;next.currentWorkoutId=newCurrent.day.workoutId;next.selectedCalendarIndex=newCurrent.index;}
+    else{next.currentIndex=0;next.currentWorkoutId=next.days[0]&&next.days[0].workoutId||'';next.selectedCalendarIndex=0;}
+    var oldLogDraft=oldProgram.currentWorkoutLogDraft,matchedOldDraft=oldLogDraft&&typeof global.findUniqueWorkoutForRecord==='function'?global.findUniqueWorkoutForRecord(oldProgram,oldLogDraft):null;
+    var mappedDraft=matchedOldDraft&&newMap.bySource[text(matchedOldDraft.sourceWorkoutKey)];
+    if(oldLogDraft&&mappedDraft){next.currentWorkoutLogDraft=copy(oldLogDraft);next.currentWorkoutLogDraft.workoutId=mappedDraft.day.workoutId;next.currentWorkoutLogDraft.sourceWorkoutKey=mappedDraft.day.sourceWorkoutKey;next.currentWorkoutLogDraft.planIndex=mappedDraft.index;next.currentWorkoutLogDraft.title=mappedDraft.day.title||mappedDraft.day['训练主题']||next.currentWorkoutLogDraft.title;}
+    else next.currentWorkoutLogDraft=null;
+    var last=typeof global.deriveLastActualState==='function'?global.deriveLastActualState(next):null;next.lastActualIndex=last?last.index:null;next.lastActualDate=last?last.date:'';
+    next.exerciseHistory=typeof global.buildExerciseHistoryFromLogs==='function'?global.buildExerciseHistoryFromLogs(next.workoutLogs):{};
+    return next;
+  }
   function replaceActiveProgram(program){
     var currentRoot=global.trainingTrackerState;
     var root=copy(currentRoot);
     var profile=global.getActiveProfile(root);
     if(!currentRoot||!profile||!root.activeProgramId) throw new Error('当前训练计划不存在。');
     var currentId=root.activeProgramId;
+    var oldProgram=profile.programs[currentId];
     var next=global.normalizeProgram(Object.assign({},program,{programId:currentId}));
+    next=mergeReplacementProgramState(oldProgram,next);
     profile.programs[currentId]=next;
     commitCandidate(root);
     return next;
@@ -121,7 +170,7 @@
       var workout=workoutMap[workoutId];
       if(!workout){
         var plannedDate=importedDate(row.plannedDate);
-        workout=workoutMap[workoutId]={workoutId:workoutId,source:'structured-v1',order:Number(row['顺序']),plannedDate:plannedDate,date:plannedDate,title:text(row['训练主题']),programName:text(row.programName),targetDurationMin:numberOrNull(row.targetDurationMin),supersetRules:copy(supersetMap[workoutId]||[]),exercises:[]};
+        workout=workoutMap[workoutId]={workoutId:workoutId,sourceWorkoutId:workoutId,sourceWorkoutKey:'structured:'+workoutId,source:'structured-v1',order:Number(row['顺序']),plannedDate:plannedDate,date:plannedDate,title:text(row['训练主题']),programName:text(row.programName),targetDurationMin:numberOrNull(row.targetDurationMin),supersetRules:copy(supersetMap[workoutId]||[]),exercises:[]};
         workout['训练主题']=workout.title;
         workout['训练内容（组×次数/余力）']='';
         workout['导入热身内容']='';
@@ -178,6 +227,7 @@
   global.createProgramFromPlan=createProgramFromPlan;
   global.addProgram=addProgram;
   global.replaceActiveProgram=replaceActiveProgram;
+  global.mergeReplacementProgramState=mergeReplacementProgramState;
   global.activateProgram=activateProgram;
   global.createCustomWorkout=createCustomWorkout;
   global.addExerciseToWorkout=addExerciseToWorkout;

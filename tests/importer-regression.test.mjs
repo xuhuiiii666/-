@@ -32,6 +32,8 @@ function fullContext(){
   const context=createContext(storage);
   context.normalizeExcelRows=rows=>(rows||[]).filter(row=>row.some(Boolean)).map(row=>row.map(value=>String(value??'').trim()));
   loadScript(context,'prescription.js');
+  loadScript(context,'date-integrity.js');
+  loadScript(context,'execution-reconciler.js');
   loadScript(context,'storage.js');
   loadScript(context,'parser.js');
   loadScript(context,'import-validator.js');

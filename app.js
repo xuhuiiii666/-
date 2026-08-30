@@ -280,30 +280,13 @@ function ensureDateMigration(){
   var changed=false;
   state.logs.forEach(function(log){
     if(log && !log.actualDate && log.date){ log.actualDate=log.date; changed=true; }
-    if(log && typeof log.planIndex==='number' && !log.workoutId && PLAN[log.planIndex]){log.workoutId=PLAN[log.planIndex].workoutId;changed=true;}
-    if(log && typeof log.planIndex==='number' && log.actualDate && !readWorkoutMap(state.actualDates,log.planIndex)){
-      state.actualDates=writeWorkoutMap(state.actualDates,log.planIndex,log.actualDate); changed=true;
+    if(log && !log.workoutId && typeof findUniqueWorkoutForRecord==='function'){
+      var matched=findUniqueWorkoutForRecord(state,log);if(matched){log.workoutId=matched.workoutId;log.sourceWorkoutKey=matched.sourceWorkoutKey||'';changed=true;}
     }
   });
-  [state.actualDates,state.dateAnchors,state.completed].forEach(function(map){
-    Object.keys(map||{}).forEach(function(key){
-      if(!/^\d+$/.test(key)||!PLAN[Number(key)]||map[PLAN[Number(key)].workoutId]!==undefined)return;
-      map[PLAN[Number(key)].workoutId]=map[key];delete map[key];changed=true;
-    });
-  });
-  if(!state.lastActualDate){
-    var keys=Object.keys(state.actualDates).filter(function(k){return state.actualDates[k];});
-    if(keys.length){
-      keys.sort(function(a,b){
-        var da=String(state.actualDates[a]||''), db=String(state.actualDates[b]||'');
-        if(da===db) return workoutIndexForKey(b)-workoutIndexForKey(a);
-        return db.localeCompare(da);
-      });
-      state.lastActualIndex=workoutIndexForKey(keys[0]);
-      state.lastActualDate=state.actualDates[keys[0]];
-      changed=true;
-    }
-  }
+  var latest=typeof deriveLastActualState==='function'?deriveLastActualState(state):null;
+  var nextIndex=latest?latest.index:null,nextDate=latest?latest.date:'';
+  if(state.lastActualIndex!==nextIndex||state.lastActualDate!==nextDate){state.lastActualIndex=nextIndex;state.lastActualDate=nextDate;changed=true;}
   return changed;
 }
 function normalizeExerciseName(name){
@@ -345,7 +328,8 @@ function readSetRow(row){
   var weight=get('[data-field="weight"]'), unit=get('[data-field="unit"]')||'kg';
   var attr=function(name){var value=row.getAttribute&&row.getAttribute(name);return value===null?'':value;};
   var nullableNumber=function(name){var value=attr(name);return value===''?null:Number(value);};
-  var data={setId:id,setNo:parseInt(row.getAttribute('data-set-no')||row.getAttribute('data-set')||'0',10)||0,weight:weight,unit:unit,weightKg:Math.round(weightToKg(weight,unit)*10)/10,reps:get('[data-field="reps"]'),rir:get('[data-field="rir"]'),duration:get('[data-field="duration"]'),rest:Number(range?range.value:90)||90,note:'',completed:row.classList&&row.classList.contains('done'),timerState:(rowTimers[id]&&rowTimers[id].running)?'running':'idle',setType:attr('data-set-type')||'working',targetRepsMin:nullableNumber('data-target-reps-min'),targetRepsMax:nullableNumber('data-target-reps-max'),targetRirMin:nullableNumber('data-target-rir-min'),targetRirMax:nullableNumber('data-target-rir-max'),targetRestMin:nullableNumber('data-target-rest-min'),targetRestMax:nullableNumber('data-target-rest-max'),loadAdjustmentType:attr('data-load-adjustment-type'),loadAdjustmentValue:nullableNumber('data-load-adjustment-value'),techniqueCue:attr('data-technique-cue'),prescriptionDefined:attr('data-prescription-defined')==='1'};
+  var editedFields=attr('data-user-edited-fields').split(',').map(function(value){return value.trim();}).filter(Boolean);
+  var data={setId:id,setNo:parseInt(row.getAttribute('data-set-no')||row.getAttribute('data-set')||'0',10)||0,weight:weight,unit:unit,weightKg:Math.round(weightToKg(weight,unit)*10)/10,reps:get('[data-field="reps"]'),rir:get('[data-field="rir"]'),duration:get('[data-field="duration"]'),rest:Number(range?range.value:90)||90,note:'',completed:row.classList&&row.classList.contains('done'),timerState:(rowTimers[id]&&rowTimers[id].running)?'running':'idle',userEditedFields:editedFields,setType:attr('data-set-type')||'working',targetRepsMin:nullableNumber('data-target-reps-min'),targetRepsMax:nullableNumber('data-target-reps-max'),targetRirMin:nullableNumber('data-target-rir-min'),targetRirMax:nullableNumber('data-target-rir-max'),targetRestMin:nullableNumber('data-target-rest-min'),targetRestMax:nullableNumber('data-target-rest-max'),loadAdjustmentType:attr('data-load-adjustment-type'),loadAdjustmentValue:nullableNumber('data-load-adjustment-value'),techniqueCue:attr('data-technique-cue'),prescriptionDefined:attr('data-prescription-defined')==='1'};
   var segments=Array.prototype.slice.call(row.querySelectorAll&&row.querySelectorAll('.compoundSegment')||[]).map(function(segment,idx){
     var segmentGet=function(field){var x=segment.querySelector('[data-field="'+field+'"]');return x?x.value:'';};
     var segmentWeight=segmentGet('weight'), segmentUnit=segmentGet('unit')||'kg';
@@ -367,6 +351,7 @@ function writeSetRow(row,data){
   if(!row||!data) return;
   if(data.setId) row.setAttribute('data-set-id',data.setId);
   if(data.setNo) row.setAttribute('data-set-no',data.setNo);
+  if(Array.isArray(data.userEditedFields)&&data.userEditedFields.length)row.setAttribute('data-user-edited-fields',data.userEditedFields.join(','));
   [['data-set-type',data.setType||'working'],['data-target-reps-min',data.targetRepsMin],['data-target-reps-max',data.targetRepsMax],['data-target-rir-min',data.targetRirMin],['data-target-rir-max',data.targetRirMax],['data-target-rest-min',data.targetRestMin],['data-target-rest-max',data.targetRestMax],['data-load-adjustment-type',data.loadAdjustmentType],['data-load-adjustment-value',data.loadAdjustmentValue],['data-technique-cue',data.techniqueCue]].forEach(function(pair){if(pair[1]!==undefined&&pair[1]!==null)row.setAttribute(pair[0],pair[1]);});
   var set=function(sel,val){var x=row.querySelector(sel); if(x&&val!==undefined){x.value=val==null?'':val; if(x.type==='range') updateRestLabel(x);}};
   set('[data-field="weight"]',data.weight);
@@ -429,7 +414,8 @@ function findCurrentSet(exerciseId,setId){
   }
   return null;
 }
-function updateSetValue(exerciseId,setId,field,value){
+function updateSetValue(exerciseId,setId,field,value,opts){
+  opts=opts||{};
   if(!setId||!field) return;
   var set=findCurrentSet(exerciseId,setId);
   if(!set){
@@ -438,21 +424,22 @@ function updateSetValue(exerciseId,setId,field,value){
   }
   if(!set) return;
   set[field]=value;
+  if(opts.userEdited&&['weight','reps','rir','duration'].indexOf(field)>=0){set.userEditedFields=Array.isArray(set.userEditedFields)?set.userEditedFields:[];if(set.userEditedFields.indexOf(field)<0)set.userEditedFields.push(field);}
   if(field==='weight'||field==='unit'){
     set.weightKg=Math.round(weightToKg(set.weight,set.unit||'kg')*10)/10;
   }
   state.currentWorkoutDrafts[currentDraftKey()].updatedAt=new Date().toISOString();
-  saveState();
+  if(!opts.noSave)saveState();
 }
 function captureCurrentWorkoutDraft(){
   state.currentWorkoutDrafts=state.currentWorkoutDrafts||{};
   var currentWorkout=getWorkout();
-  var draft={updatedAt:new Date().toISOString(),workoutId:currentWorkout&&currentWorkout.workoutId,planIndex:state.currentIndex,note:getCurrentSessionNote(),warmupInput:(document.getElementById('warmupInput')&&document.getElementById('warmupInput').value)||'',warmups:[],mains:[]};
+  var draft={updatedAt:new Date().toISOString(),workoutId:currentWorkout&&currentWorkout.workoutId,sourceWorkoutKey:currentWorkout&&currentWorkout.sourceWorkoutKey||'',planIndex:state.currentIndex,note:getCurrentSessionNote(),warmupInput:(document.getElementById('warmupInput')&&document.getElementById('warmupInput').value)||'',warmups:[],mains:[]};
   document.querySelectorAll('#warmupExercises .warmCard').forEach(function(card){
-    draft.warmups.push({exerciseId:card.getAttribute('data-card-id')||card.id||'',name:(card.querySelector('[data-field="warmName"]')&&card.querySelector('[data-field="warmName"]').value)||'',sets:Array.prototype.slice.call(card.querySelectorAll('.warmSets .setrow')).map(readSetRow)});
+    draft.warmups.push({exerciseId:card.getAttribute('data-card-id')||card.id||'',name:(card.querySelector('[data-field="warmName"]')&&card.querySelector('[data-field="warmName"]').value)||'',note:(card.querySelector('[data-field="moduleNote"]')&&card.querySelector('[data-field="moduleNote"]').value)||'',sets:Array.prototype.slice.call(card.querySelectorAll('.warmSets .setrow')).map(readSetRow)});
   });
   document.querySelectorAll('#exercises .mainCard').forEach(function(card){
-    draft.mains.push({exerciseId:card.getAttribute('data-card-id')||card.id||'',name:(card.querySelector('[data-field="mainName"]')&&card.querySelector('[data-field="mainName"]').value)||'',originalName:card.getAttribute('data-original-name')||'',trackName:card.getAttribute('data-track-name')||'',custom:card.hasAttribute('data-custom-main'),sets:Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow')).map(readSetRow)});
+    draft.mains.push({exerciseId:card.getAttribute('data-card-id')||card.id||'',name:(card.querySelector('[data-field="mainName"]')&&card.querySelector('[data-field="mainName"]').value)||'',originalName:card.getAttribute('data-original-name')||'',trackName:card.getAttribute('data-track-name')||'',custom:card.hasAttribute('data-custom-main'),note:(card.querySelector('[data-field="moduleNote"]')&&card.querySelector('[data-field="moduleNote"]').value)||'',sets:Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow')).map(readSetRow)});
   });
   state.currentWorkoutDrafts[currentDraftKey()]=draft;
   return draft;
@@ -522,13 +509,24 @@ function clearCurrentWorkoutDraft(index){
   var target=PLAN[Math.max(0,Math.min(PLAN.length-1,Number(index===undefined?state.currentIndex:index)||0))];
   delete state.currentWorkoutDrafts[target&&target.workoutId?target.workoutId:String(index===undefined?state.currentIndex:index)];
 }
+var runtimeDateIntegrityState=null;
+function refreshRuntimeDateIntegrity(){
+  var actual={},anchors=Object.assign({},state.dateAnchors||{}),report=typeof inspectProgramDateIntegrity==='function'?inspectProgramDateIntegrity(state):null;
+  if(report){
+    report.validActualDates.forEach(function(item){actual[item.workoutId]=item.date;});
+    Object.keys(state.actualDates||{}).forEach(function(workoutId){if(actual[workoutId]===undefined&&anchors[workoutId]===state.actualDates[workoutId])delete anchors[workoutId];});
+  }else actual=Object.assign({},state.actualDates||{});
+  runtimeDateIntegrityState={program:state,actualDates:actual,dateAnchors:anchors,report:report};
+  return runtimeDateIntegrityState;
+}
+function trustedRuntimeDates(){return runtimeDateIntegrityState&&runtimeDateIntegrityState.program===state?runtimeDateIntegrityState:refreshRuntimeDateIntegrity();}
 function actualDateFor(index){
-  state.actualDates=state.actualDates||{};
-  var v=readWorkoutMap(state.actualDates,index);
+  var v=readWorkoutMap(trustedRuntimeDates().actualDates,index);
   return v || '';
 }
 function latestActualPosition(){
-  var items=Object.keys(state.actualDates||{}).map(function(key){return {index:workoutIndexForKey(key),date:state.actualDates[key]};}).filter(function(item){return item.index>=0&&item.date;});
+  var actual=trustedRuntimeDates().actualDates;
+  var items=Object.keys(actual).map(function(key){return {index:workoutIndexForKey(key),date:actual[key]};}).filter(function(item){return item.index>=0&&item.date;});
   items.sort(function(a,b){return String(b.date).localeCompare(String(a.date))||b.index-a.index;});
   return items[0]||null;
 }
@@ -536,17 +534,18 @@ function scheduledDateFor(index){
   index=Math.max(0,Math.min(PLAN.length-1,Number(index)||0));
   state.actualDates=state.actualDates||{};
   state.dateAnchors=state.dateAnchors||{};
+  var trusted=trustedRuntimeDates(),actualDates=trusted.actualDates,dateAnchors=trusted.dateAnchors;
   if(typeof calculateScheduledWorkoutDate==='function'){
-    return calculateScheduledWorkoutDate(PLAN,index,state.actualDates,state.dateAnchors,state.startDate,localDateString())||plannedDateFor(index)||localDateString();
+    return calculateScheduledWorkoutDate(PLAN,index,actualDates,dateAnchors,state.startDate,localDateString())||plannedDateFor(index)||localDateString();
   }
-  if(readWorkoutMap(state.actualDates,index)) return readWorkoutMap(state.actualDates,index);
+  if(readWorkoutMap(actualDates,index)) return readWorkoutMap(actualDates,index);
 
   var latest=latestActualPosition();
   if(latest && index>latest.index){
     var cur=String(latest.date);
     for(var p=latest.index+1;p<=index;p++){
-      if(readWorkoutMap(state.actualDates,p)){
-        if(String(readWorkoutMap(state.actualDates,p))>cur) cur=readWorkoutMap(state.actualDates,p);
+      if(readWorkoutMap(actualDates,p)){
+        if(String(readWorkoutMap(actualDates,p))>cur) cur=readWorkoutMap(actualDates,p);
       }else{
         cur=addDays(cur,1);
       }
@@ -554,7 +553,7 @@ function scheduledDateFor(index){
     return cur;
   }
 
-  var source=Object.assign({}, state.dateAnchors||{}, state.actualDates||{});
+  var source=Object.assign({},dateAnchors,actualDates);
   var anchors=Object.keys(source).map(function(key){return {index:workoutIndexForKey(key),value:source[key]};}).filter(function(item){return item.index>=0&&item.index<=index;}).sort(function(a,b){return b.index-a.index;});
   if(anchors.length){var a=anchors[0];return addDays(a.value, index-a.index);}
   if(plannedDateFor(index)) return plannedDateFor(index);
@@ -568,11 +567,21 @@ function markActualTrainingDate(index,dateStr,opts){
   index=Math.max(0,Math.min(PLAN.length-1,Number(index)||0));
   var date=dateStr || localDateString();
   state.actualDates=state.actualDates||{};
-  state.actualDates=writeWorkoutMap(state.actualDates,index,date);
-  state.dateAnchors=state.dateAnchors||{};
-  state.dateAnchors=writeWorkoutMap(state.dateAnchors,index,date);
+  var workout=PLAN[index],workoutId=workout&&workout.workoutId,existing=workoutId&&state.actualDates[workoutId];
+  var existingSession=workoutId&&state.sessionStartedAt&&state.sessionStartedAt[workoutId],existingSessionDate=existingSession&&String(existingSession.actualDate||existingSession.startedAt||'').slice(0,10);
+  if(existing===date&&existingSessionDate===date)return existing;
+  if(existing&&existing!==date&&opts.force!==true&&typeof inspectProgramDateIntegrity==='function'){
+    var integrity=inspectProgramDateIntegrity(state),trusted=integrity.validActualDates.some(function(item){return item.workoutId===workoutId;});
+    if(trusted)return existing;
+  }
+  if(workoutId&&typeof createStartedExecutionState==='function'){
+    var started=createStartedExecutionState(state,workoutId,date,new Date().toISOString());state.actualDates=started.actualDates;state.dateAnchors=started.dateAnchors;state.sessionStartedAt=started.sessionStartedAt;
+  }else{
+    state.actualDates=writeWorkoutMap(state.actualDates,index,date);state.dateAnchors=writeWorkoutMap(state.dateAnchors||{},index,date);state.sessionStartedAt=state.sessionStartedAt||{};if(workoutId)state.sessionStartedAt[workoutId]={startedAt:new Date().toISOString(),actualDate:date};
+  }
   state.lastActualIndex=index;
   state.lastActualDate=date;
+  refreshRuntimeDateIntegrity();
   if(!opts.noSave) saveState();
   var inp=document.getElementById('actualDate'); if(inp && index===state.currentIndex) inp.value=date;
   return date;
@@ -582,7 +591,7 @@ function markCurrentTrainingToday(opts){
 }
 function anchorCurrentDate(){
   let inp=document.getElementById('actualDate'); if(!inp||!inp.value) return;
-  markActualTrainingDate(state.currentIndex, inp.value, {noSave:true});
+  state.dateAnchors=writeWorkoutMap(state.dateAnchors||{},state.currentIndex,inp.value);refreshRuntimeDateIntegrity();
   saveState(); renderCalendar();
   let w=getWorkout();
   document.getElementById('dateLine').textContent = `训练序号 ${state.currentIndex+1}/${PLAN.length}｜实际日期 ${effectiveDateFor(state.currentIndex)}｜原计划 ${plannedDateFor(state.currentIndex)} ${w['星期']||''}`;
@@ -593,7 +602,7 @@ function anchorSelectedDate(){
   if(!inp || !inp.value){ alert('先选择一个日期。'); return; }
   var selected=(state.selectedCalendarIndex===undefined?state.currentIndex:state.selectedCalendarIndex);
   selected=Math.max(0,Math.min(PLAN.length-1,Number(selected)||0));
-  markActualTrainingDate(selected, inp.value, {noSave:true});
+  state.dateAnchors=writeWorkoutMap(state.dateAnchors||{},selected,inp.value);refreshRuntimeDateIntegrity();
   saveState();
   renderCalendar();
   setTimeout(function(){ scrollCalendarToIndex(selected); },60);
@@ -612,7 +621,7 @@ function scrollCalendarToCurrent(){
   scrollCalendarToIndex(Math.max(0,Math.min(PLAN.length-1,Number(idx)||0)));
 }
 
-function clearDateAnchors(){if(confirm('确认清空手动排期日期？已实际训练过的 actualDate 会保留，不会清掉训练日志日期。')){state.dateAnchors=Object.assign({},state.actualDates||{});saveState();rebuild();renderCalendar();}}
+function clearDateAnchors(){if(confirm('确认清空手动排期日期？已实际训练过的 actualDate 会保留，不会清掉训练日志日期。')){state.dateAnchors=Object.assign({},trustedRuntimeDates().actualDates);refreshRuntimeDateIntegrity();saveState();rebuild();renderCalendar();}}
 function warmupFor(name){let w=WARMUPS.find(x=>x.name===name);return w? w.steps+"\n\n备注："+w.notes : '休息日：散步、轻拉伸、足弓激活即可。';}
 function workoutPurpose(w){
   let t=((w&&w['训练主题'])||'')+' '+((w&&w['热身模板'])||'')+' '+((w&&w['训练内容（组×次数/余力）'])||'');
@@ -1671,6 +1680,7 @@ function updateRestLabel(input){
 
 
 function rebuild(){
+  refreshRuntimeDateIntegrity();
   let w=getWorkout(); let exs=parseExercises(w['训练内容（组×次数/余力）'],w);
   var actual=actualDateFor(state.currentIndex), scheduled=scheduledDateFor(state.currentIndex), planned=plannedDateFor(state.currentIndex);
   document.getElementById('dateLine').textContent = `训练序号 ${state.currentIndex+1}/${PLAN.length}｜${actual?'实际日期':'队列日期'} ${actual||scheduled}｜原计划 ${planned||'-'} ${w['星期']||''}`;
@@ -1717,17 +1727,20 @@ function isTrainingDataField(el){
   var f=el.getAttribute && el.getAttribute('data-field');
   return /^(weight|reps|rir|duration|unit|mainName|warmName|moduleNote)$/.test(f||'');
 }
+function trainingInputStartsExecution(field,value){return typeof shouldCreateActualDateForAction==='function'?shouldCreateActualDateForAction('training-input',{field:field,value:value}):(/^(weight|reps|rir|duration|moduleNote)$/.test(field||'')&&String(value===undefined||value===null?'':value).trim()!=='');}
+function markRowFieldEdited(row,field){if(!row||['weight','reps','rir','duration'].indexOf(field)<0)return;var fields=String(row.getAttribute('data-user-edited-fields')||'').split(',').map(function(value){return value.trim();}).filter(Boolean);if(fields.indexOf(field)<0)fields.push(field);row.setAttribute('data-user-edited-fields',fields.join(','));}
 function handleTrainingDataInput(ev){
   if(ev && ev.target && isTrainingDataField(ev.target)){
-    markCurrentTrainingToday({noSave:true});
-    captureCurrentWorkoutDraft();
     var row=ev.target.closest&&ev.target.closest('.setrow');
     var card=ev.target.closest&&ev.target.closest('.exercise');
     var field=ev.target.getAttribute('data-field');
+    markRowFieldEdited(row,field);
+    captureCurrentWorkoutDraft();
     if(card&&field==='mainName') persistCurrentExerciseName(card,ev.target.value);
     if(row && field && !ev.target.closest('.compoundSegment')){
-      updateSetValue(card?(card.getAttribute('data-card-id')||card.id||''):'',row.getAttribute('data-set-id')||String(row.id||'').replace(/^row_/,''),field,ev.target.value);
+      updateSetValue(card?(card.getAttribute('data-card-id')||card.id||''):'',row.getAttribute('data-set-id')||String(row.id||'').replace(/^row_/,''),field,ev.target.value,{userEdited:true,noSave:true});
     }
+    if(trainingInputStartsExecution(field,ev.target.value))markCurrentTrainingToday({noSave:true});
     saveState();
     if(card&&card.classList&&card.classList.contains('mainCard')) updateAnchorAssessment(card);
   }
@@ -1843,7 +1856,9 @@ function syncFloatingNote(){
   return setCurrentSessionNote(value,{noSave:true});
 }
 function saveSessionNoteFromInput(el){
-  setCurrentSessionNote(el&&el.value?el.value:'');
+  var value=el&&el.value?el.value:'';setCurrentSessionNote(value,{noSave:true});
+  if(String(value).trim())markCurrentTrainingToday({noSave:true});
+  captureCurrentWorkoutDraft();saveState();
 }
 function saveFloatingNote(){ syncFloatingNote(); saveState(); }
 function keepFloatingNoteForNext(){
@@ -1935,13 +1950,13 @@ function initFloatingNoteDrag(){
 }
 
 function saveProgress(){
-  markCurrentTrainingToday({noSave:true});
   syncFloatingNote();
-  captureCurrentWorkoutDraft();
+  var draft=captureCurrentWorkoutDraft();
+  if(typeof hasMeaningfulTrainingInput==='function'&&hasMeaningfulTrainingInput(draft))markCurrentTrainingToday({noSave:true});
   var w=getWorkout(), key=workoutWarmupKey(), input=document.getElementById('warmupInput');
   if(input) state.customWarmups[key]=input.value;
   saveState();
-  alert('已保存当前输入、热身项目和实际训练日期。');
+  alert('已保存当前输入和热身项目。存在真实训练输入时会同步实际训练日期。');
 }
 function finishWorkout(){
   markCurrentTrainingToday({noSave:true});
@@ -1950,7 +1965,7 @@ function finishWorkout(){
   let w=getWorkout(); let entries=collectEntries();
   let logDate=actualDateFor(state.currentIndex) || localDateString();
   var note=syncFloatingNote();
-  var logObj={date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), workoutId:w.workoutId, planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:'已完成', note:note, entries};
+  var logObj={date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), workoutId:w.workoutId, sourceWorkoutKey:w.sourceWorkoutKey||'', planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:'已完成', note:note, entries};
   state.logs.push(logObj); archiveSessionNote(logObj);
   state.workoutLogs=state.logs;
   state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs);
@@ -2246,7 +2261,6 @@ function bindCalendarTapHandlers(){
 function enterSelectedTraining(){
   var i=(state.selectedCalendarIndex===undefined?state.currentIndex:state.selectedCalendarIndex);
   state.currentIndex=Math.max(0,Math.min(PLAN.length-1,Number(i)||0));
-  markCurrentTrainingToday({noSave:true});
   saveState();
   showTab('today');
   rebuild();
@@ -2316,6 +2330,7 @@ function createCustomWorkoutFromInput(){
   }catch(error){console.error('新建训练失败',error);alert('新建训练失败：'+(error.message||error));}
 }
 function renderCalendar(){
+  refreshRuntimeDateIntegrity();
   renderProgramSwitcher();
   var done=state.completed||{};
   var selected=(state.selectedCalendarIndex===undefined?state.currentIndex:state.selectedCalendarIndex);
@@ -2344,7 +2359,7 @@ function renderCalendar(){
     if(i===selected) flags+='<span class="flag flagSel">选中</span>';
     if(readWorkoutMap(done,i)) flags+='<span class="flag">已完成</span>';
     if(hasActual) flags+='<span class="flag">实际训练</span>';
-    else if(readWorkoutMap(state.dateAnchors||{},i)) flags+='<span class="flag">排期锚点</span>';
+    else if(readWorkoutMap(trustedRuntimeDates().dateAnchors,i)) flags+='<span class="flag">排期锚点</span>';
     var bandStyle='background:'+pal.color+';color:'+pal.text+';';
     html+='<div class="'+cls+'" data-cal-index="'+i+'" onclick="return goCalendarDay('+i+', event)">'
       +'<div class="labelBand" style="'+bandStyle+'">'+pal.label+'</div>'
@@ -2365,7 +2380,7 @@ function renderCalendar(){
   var selectedInfo=document.getElementById('selectedCalInfo');
   if(selectedInfo){ selectedInfo.innerHTML='<b>已选中：</b>#'+(selected+1)+'｜'+effectiveDateFor(selected)+'｜'+escapeHtml(sw['训练主题']||'未命名训练')+'<br><span class="small">进入训练或填写记录后会自动把这一练标记为今天；已实际训练过的日期会锁定，后续未完成训练从最近一次实际训练日继续顺推。</span>'; }
   var sDate=document.getElementById('selectedActualDate'); if(sDate) sDate.value=effectiveDateFor(selected);
-  var anchors=Object.entries(state.actualDates||{}).map(function(x){return {index:workoutIndexForKey(x[0]),date:x[1]};}).filter(function(x){return x.index>=0;}).sort(function(a,b){return a.index-b.index;}).map(function(x){return '#'+(x.index+1)+'='+x.date;}).join('；') || '无';
+  var anchors=Object.entries(trustedRuntimeDates().actualDates).map(function(x){return {index:workoutIndexForKey(x[0]),date:x[1]};}).filter(function(x){return x.index>=0;}).sort(function(a,b){return a.index-b.index;}).map(function(x){return '#'+(x.index+1)+'='+x.date;}).join('；') || '无';
   var hint=document.getElementById('calendarHint');
   if(hint) hint.textContent='文字标签版：每张卡顶部直接显示训练类型。黄色=当前应练，蓝色=当前选中。实际训练日期：'+anchors;
 }
@@ -2393,9 +2408,48 @@ function renderStorageMaintenance(){
     legacyActions.innerHTML=existingLegacy.map(function(key){return '<button type="button" data-storage-key="'+escapeHtml(key)+'" onclick="exportLegacyKeyFromSettings(this.dataset.storageKey)">导出 Legacy：'+escapeHtml(key)+'</button>';}).join('');
   }
 }
+var dateRepairPreview=null;
+function programWeightedEntryCount(program){var count=0;(program&&program.workoutLogs||[]).forEach(function(log){(log.entries||[]).forEach(function(entry){if((entry.weight!==undefined&&String(entry.weight)!=='')||Number(entry.weightKg)>0)count++;});});return count;}
+function renderDateIntegrityMaintenance(){
+  var box=document.getElementById('dateIntegrityDiagnostic');if(!box||typeof inspectProgramDateIntegrity!=='function'||typeof reconcileProgramExecutionState!=='function')return;
+  var report=inspectProgramDateIntegrity(state),reconciliation=reconcileProgramExecutionState(state,state.workoutLogs),stats=reconciliation.stats,conflictIds=report.conflictingActualDates.map(function(item){return item.workoutId;}),autoConflictIds={};reconciliation.safeRebind.concat(reconciliation.safeRemove).forEach(function(item){var id=item.fromWorkoutId||item.workoutId;if(conflictIds.indexOf(id)>=0)autoConflictIds[id]=true;});var autoConflicts=Object.keys(autoConflictIds).length,manualConflicts=Math.max(0,conflictIds.length-autoConflicts),usage=typeof estimateStorageUsage==='function'?estimateStorageUsage():{rootBytes:0},profile=typeof getActiveProfile==='function'?getActiveProfile():null,programCount=profile&&profile.programs?Object.keys(profile.programs).length:1;
+  box.innerHTML='<b>训练数据完整性</b><br>Program：'+programCount+'｜Workout：'+(state.days||[]).length+'｜历史训练：'+(state.workoutLogs||[]).length+'｜有重量记录：'+programWeightedEntryCount(state)+'<br>'
+    +'执行日期：'+stats.actualDates+'｜安全保留：'+stats.safeKeep+'｜可安全重绑：'+stats.safeRebind+'｜可安全移除：'+stats.safeRemove+'｜需人工确认：'+stats.ambiguous+'<br>'
+    +'日志唯一映射：'+stats.uniqueLogs+'｜无法映射：'+stats.unmappedLogs+'｜多重候选：'+stats.multipleLogs+'｜stale draft：'+Math.max(report.counts.staleDraftDates,stats.staleDrafts)+'<br>'
+    +'身份冲突：'+conflictIds.length+'｜可自动解决：'+autoConflicts+'｜保留待确认：'+manualConflicts+'<br>'
+    +'当前 ROOT：'+formatStorageBytes(usage.rootBytes)+((stats.safeRebind||stats.safeRemove||stats.ambiguous||report.counts.staleDraftDates)?'<br><span class="dangerText">发现执行状态需要对账。修复不会修改任何 workoutLogs 或历史重量。</span>':'<br>未发现需要修复的执行身份异常。');
+  var previewButton=document.getElementById('previewDateRepairButton'),needsPreview=stats.safeRebind||stats.safeRemove||stats.ambiguous||report.counts.staleDraftDates;if(previewButton)previewButton.classList.toggle('hidden',!needsPreview);
+}
+function checkTrainingDataIntegrity(){dateRepairPreview=null;renderDateIntegrityMaintenance();var execute=document.getElementById('executeDateRepairButton');if(execute)execute.classList.add('hidden');var out=document.getElementById('dateRepairPreview');if(out){out.textContent='只读检查完成，尚未修改任何数据。';out.classList.remove('hidden');}showToast('训练数据完整性检查完成');}
+function dateRepairScheduleResolver(program,index){return typeof calculateScheduledWorkoutDate==='function'?calculateScheduledWorkoutDate(program.days,index,program.actualDates,program.dateAnchors,program.startDate,localDateString()):'';}
+function previewDateStateRepair(){
+  try{
+    dateRepairPreview=repairProgramDateState(state,{dryRun:true,scheduledDateResolver:dateRepairScheduleResolver});
+    var diff=dateRepairPreview.diff,reconciliation=dateRepairPreview.reconciliation,stats=reconciliation&&reconciliation.stats||{},out=document.getElementById('dateRepairPreview'),execute=document.getElementById('executeDateRepairButton');
+    if(out){out.textContent='执行状态对账预览（尚未保存）\n安全保留：'+(stats.safeKeep||0)+'\n可安全重新绑定：'+(stats.safeRebind||0)+'\n可安全移除：'+(stats.safeRemove||0)+'\n需要人工确认并保留原状：'+(stats.ambiguous||0)+'\n日志唯一映射 / 无法映射 / 多重候选：'+(stats.uniqueLogs||0)+' / '+(stats.unmappedLogs||0)+' / '+(stats.multipleLogs||0)+'\n将重建 stale currentWorkoutLogDraft：'+(diff.rebuiltCurrentWorkoutLogDraft?1:0)+'\nworkoutLogs hash：'+diff.workoutLogsHashBefore+' = '+diff.workoutLogsHashAfter+'\n历史重量：'+diff.weightedEntriesBefore+' = '+diff.weightedEntriesAfter+'\n修复后 lastActual：'+(diff.lastActualDate||'无')+'\n\n本次修复不会修改任何 workoutLogs、历史重量或模糊项。';out.classList.remove('hidden');}
+    if(execute)execute.classList.toggle('hidden',!((stats.safeRebind||0)+(stats.safeRemove||0)+(diff.rebuiltCurrentWorkoutLogDraft?1:0)));
+  }catch(error){console.error('日期修复预览失败',error);alert('预览失败：'+(error.message||error));}
+}
+function executeDateStateRepair(){
+  if(!dateRepairPreview){previewDateStateRepair();if(!dateRepairPreview)return;}
+  var stats=dateRepairPreview.reconciliation&&dateRepairPreview.reconciliation.stats||{};
+  if(!confirm('确认执行安全对账？将重新绑定 '+(stats.safeRebind||0)+' 项、移除 '+(stats.safeRemove||0)+' 项；'+(stats.ambiguous||0)+' 项模糊状态保持原样。系统会先导出原始恢复快照。'))return;
+  try{
+    if(typeof exportRawTrainingState==='function')exportRawTrainingState();
+    var root=JSON.parse(JSON.stringify(trainingTrackerState)),profile=root.profiles[root.activeProfileId];
+    var beforeProfile={exerciseTemplates:JSON.stringify(profile.exerciseTemplates||[]),warmupTemplates:JSON.stringify(profile.warmupTemplates||[]),rmRecords:JSON.stringify(profile.rmRecords||[])},beforeProgram=profile.programs[root.activeProgramId],beforeNotes=JSON.stringify({currentSessionNote:beforeProgram.currentSessionNote||'',noteArchive:beforeProgram.noteArchive||[]}),beforeHash=hashWorkoutLogs(beforeProgram.workoutLogs||[]),beforeWeighted=countWeightedWorkoutLogEntries(beforeProgram.workoutLogs||[]);
+    profile.programs[root.activeProgramId]=dateRepairPreview.program;
+    var afterProgram=profile.programs[root.activeProgramId];
+    if(beforeHash!==hashWorkoutLogs(afterProgram.workoutLogs||[])||beforeWeighted!==countWeightedWorkoutLogEntries(afterProgram.workoutLogs||[]))throw new StateIntegrityError('安全对账校验失败：历史日志或重量发生变化。');
+    if(beforeProfile.exerciseTemplates!==JSON.stringify(profile.exerciseTemplates||[])||beforeProfile.warmupTemplates!==JSON.stringify(profile.warmupTemplates||[])||beforeProfile.rmRecords!==JSON.stringify(profile.rmRecords||[])||beforeNotes!==JSON.stringify({currentSessionNote:afterProgram.currentSessionNote||'',noteArchive:afterProgram.noteArchive||[]}))throw new StateIntegrityError('安全对账校验失败：模板、RM 或备注发生变化。');
+    saveRootCandidate(root);
+    state=getActiveProgram();PLAN=state.days;state.exerciseHistory=buildExerciseHistoryFromLogs(state.workoutLogs||[]);
+    dateRepairPreview=null;rebuild();renderCalendar();renderHistory();renderSettings();showToast('安全日期修复已完成');
+  }catch(error){console.error('执行日期修复失败',error);alert((typeof isStorageQuotaError==='function'&&isStorageQuotaError(error))?'存储空间不足，本次修改未保存。':'修复失败：'+(error.message||error));}
+}
 function renderSettings(){
   document.getElementById('startDate').value=state.startDate||'';document.getElementById('currentIndex').value=state.currentIndex;document.getElementById('mainRest').value=state.settings.mainRest;document.getElementById('assistRest').value=state.settings.assistRest;
-  var recovery=document.getElementById('preV6Recovery');if(recovery)recovery.classList.toggle('hidden',!(typeof hasPreV6Backup==='function'&&hasPreV6Backup()));renderStorageMaintenance();
+  var recovery=document.getElementById('preV6Recovery');if(recovery)recovery.classList.toggle('hidden',!(typeof hasPreV6Backup==='function'&&hasPreV6Backup()));renderStorageMaintenance();renderDateIntegrityMaintenance();
 }
 function exportRawStateFromSettings(){try{exportRawTrainingState();showToast('已导出原始本地存档');}catch(error){console.error('导出原始本地存档失败',error);alert('导出失败：'+(error.message||error));}}
 function exportPreV6FromSettings(){try{exportRawPreV6Backup();showToast('已导出升级前原始备份');}catch(error){console.error('导出升级前备份失败',error);alert('导出失败：'+(error.message||error));}}
@@ -2481,7 +2535,7 @@ function buildWorkoutLogSnapshotFromDom(status){
   var entries=collectEntries();
   var note=syncFloatingNote();
   var logDate=actualDateFor(state.currentIndex) || localDateString();
-  return {date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), workoutId:w.workoutId, planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:status||'已完成', note:note, entries:entries};
+  return {date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), workoutId:w.workoutId, sourceWorkoutKey:w.sourceWorkoutKey||'', planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:status||'已完成', note:note, entries:entries};
 }
 function buildWorkoutLogFromCurrent(){
   markCurrentTrainingToday({noSave:true});
@@ -2838,7 +2892,7 @@ function refreshCalendarAndFocus(delay){
     var inp=document.getElementById('selectedActualDate');
     if(!inp || !inp.value){ alert('先选择一个日期。'); return; }
     var selected=getCalendarFocusIndex();
-    markActualTrainingDate(selected, inp.value, {noSave:true});
+    state.dateAnchors=writeWorkoutMap(state.dateAnchors||{},selected,inp.value);refreshRuntimeDateIntegrity();
     saveState();
     refreshCalendarAndFocus(120);
   };

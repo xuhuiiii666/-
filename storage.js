@@ -40,6 +40,10 @@
   }
   StorageQuotaError.prototype=Object.create(Error.prototype);
   StorageQuotaError.prototype.constructor=StorageQuotaError;
+  function StateIntegrityError(message,details){this.name='StateIntegrityError';this.code='STATE_INTEGRITY_FAILED';this.message=message||'训练状态完整性校验失败。';this.details=details||{};if(Error.captureStackTrace)Error.captureStackTrace(this,StateIntegrityError);}
+  StateIntegrityError.prototype=Object.create(Error.prototype);StateIntegrityError.prototype.constructor=StateIntegrityError;
+  function MigrationError(message,details){this.name='MigrationError';this.code='STATE_MIGRATION_FAILED';this.message=message||'训练状态迁移失败。';this.details=details||{};if(Error.captureStackTrace)Error.captureStackTrace(this,MigrationError);}
+  MigrationError.prototype=Object.create(Error.prototype);MigrationError.prototype.constructor=MigrationError;
 
   function normalizeSet(set,index){
     var next=Object.assign({},asObject(set));
@@ -83,6 +87,7 @@
     next['训练主题']=next['训练主题']||next.title;
     next.createdAt=next.createdAt||nowIso();
     next.updatedAt=next.updatedAt||next.createdAt;
+    next.sourceWorkoutKey=next.sourceWorkoutKey||(typeof global.deriveSourceWorkoutKey==='function'?global.deriveSourceWorkoutKey(next,index,next.source||source):'');
     next.exercises=asArray(next.exercises).map(function(exercise,exerciseIndex){return normalizeExercise(exercise,exerciseIndex);});
     return next;
   }
@@ -102,6 +107,7 @@
     next.actualDates=asObject(next.actualDates);
     next.dateAnchors=asObject(next.dateAnchors);
     next.completed=asObject(next.completed);
+    next.sessionStartedAt=asObject(next.sessionStartedAt);
     next.currentWorkoutDrafts=asObject(next.currentWorkoutDrafts);
     next.currentWorkoutLogDraft=next.currentWorkoutLogDraft||null;
     next.currentIndex=Math.max(0,Math.min(next.days.length?next.days.length-1:0,Number(next.currentIndex)||0));
@@ -118,21 +124,23 @@
     next.noteArchive=asArray(next.noteArchive);
     next.keepNoteForNext=!!next.keepNoteForNext;
     next.endReminderFlags=asObject(next.endReminderFlags);
-    ['actualDates','dateAnchors','completed','currentWorkoutDrafts'].forEach(function(field){
-      var map=next[field]||{};
-      Object.keys(map).forEach(function(key){
-        if(!/^\d+$/.test(key)||!next.days[Number(key)]) return;
-        var stableKey=next.days[Number(key)].workoutId;
-        if(map[stableKey]===undefined) map[stableKey]=map[key];
-        delete map[key];
+    if(defaults.allowIndexStateMigration===true){
+      ['actualDates','dateAnchors','completed','currentWorkoutDrafts','sessionStartedAt'].forEach(function(field){
+        var map=next[field]||{};
+        Object.keys(map).forEach(function(key){
+          if(!/^\d+$/.test(key)||!next.days[Number(key)]) return;
+          var stableKey=next.days[Number(key)].workoutId;
+          if(map[stableKey]===undefined) map[stableKey]=map[key];
+          delete map[key];
+        });
       });
-    });
-    Object.keys(next.customWarmups).forEach(function(key){
-      var match=key.match(/^idx_(\d+)$/);if(!match||!next.days[Number(match[1])])return;
-      var stableKey='workout_'+next.days[Number(match[1])].workoutId;
-      if(next.customWarmups[stableKey]===undefined)next.customWarmups[stableKey]=next.customWarmups[key];
-      delete next.customWarmups[key];
-    });
+      Object.keys(next.customWarmups).forEach(function(key){
+        var match=key.match(/^idx_(\d+)$/);if(!match||!next.days[Number(match[1])])return;
+        var stableKey='workout_'+next.days[Number(match[1])].workoutId;
+        if(next.customWarmups[stableKey]===undefined)next.customWarmups[stableKey]=next.customWarmups[key];
+        delete next.customWarmups[key];
+      });
+    }
     next.createdAt=next.createdAt||nowIso();
     next.updatedAt=next.updatedAt||next.createdAt;
     return next;
@@ -169,7 +177,7 @@
       profile.warmupActionTemplates=asArray(profile.warmupActionTemplates);
       profile.rmRecords=asArray(profile.rmRecords);
       Object.keys(profile.programs).forEach(function(programId){
-        var normalized=normalizeProgram(profile.programs[programId],{programId:programId});
+        var normalized=normalizeProgram(profile.programs[programId],{programId:programId,allowIndexStateMigration:options.allowIndexStateMigration===true});
         profile.programs[normalized.programId]=normalized;
         if(normalized.programId!==programId) delete profile.programs[programId];
       });
@@ -199,7 +207,7 @@
     var hasLegacy=Object.keys(legacy).length>0||Array.isArray(importedPlan);
     var plan=Array.isArray(importedPlan)&&importedPlan.length?importedPlan:(Array.isArray(legacy.plan)&&legacy.plan.length?legacy.plan:builtinPlan);
     var source=Array.isArray(importedPlan)&&importedPlan.length?'legacy-import':'builtin';
-    var program=normalizeProgram(Object.assign({},legacy,{days:copy(plan)}),{name:source==='builtin'?'示例训练计划':'迁移的训练计划',source:source});
+    var program=normalizeProgram(Object.assign({},legacy,{days:copy(plan)}),{name:source==='builtin'?'示例训练计划':'迁移的训练计划',source:source,allowIndexStateMigration:true});
     var profile={profileId:DEFAULT_PROFILE_ID,name:'默认档案',programs:{},exerciseTemplates:asArray(legacy.exerciseTemplates),warmupTemplates:asArray(legacy.warmupTemplates),warmupActionTemplates:asArray(legacy.warmupActionTemplates),rmRecords:asArray(legacy.rmRecords)};
     profile.programs[program.programId]=program;
     var profiles={};profiles[DEFAULT_PROFILE_ID]=profile;
@@ -267,11 +275,16 @@
     return {before:beforeStats,after:afterStats};
   }
   function migrateRootTransaction(raw,builtinPlan,builtinWarmups){
-    var source=copy(raw);
-    var migrated=normalizeRoot(copy(raw),builtinPlan,builtinWarmups,{allowDefault:false});
-    migrated.migrationIntegrity=validateMigratedState(source,migrated);
-    migrated.migratedToV6At=migrated.migratedToV6At||nowIso();
-    return migrated;
+    try{
+      var source=copy(raw);
+      var migrated=normalizeRoot(copy(raw),builtinPlan,builtinWarmups,{allowDefault:false,allowIndexStateMigration:(Number(raw&&raw.schemaVersion)||0)<SCHEMA_VERSION});
+      migrated.migrationIntegrity=validateMigratedState(source,migrated);
+      migrated.migratedToV6At=migrated.migratedToV6At||nowIso();
+      return migrated;
+    }catch(error){
+      if(error&&error.name==='MigrationError')throw error;
+      throw new MigrationError(error&&error.message?error.message:String(error),{causeName:error&&error.name||'Error'});
+    }
   }
 
   function removeFields(target,fields){fields.forEach(function(field){delete target[field];});}
@@ -296,17 +309,17 @@
       var profile=root.profiles[profileId]||{},target={exerciseTemplates:copy(asArray(profile.exerciseTemplates)),warmupTemplates:copy(asArray(profile.warmupTemplates)),warmupActionTemplates:copy(asArray(profile.warmupActionTemplates)),rmRecords:copy(asArray(profile.rmRecords)),programs:{}};
       Object.keys(asObject(profile.programs)).sort().forEach(function(programId){
         var program=profile.programs[programId]||{};
-        target.programs[programId]={days:copy(asArray(program.days||program.plan)),workoutLogs:copy(getProgramLogs(program)),currentWorkoutId:program.currentWorkoutId||'',currentIndex:Number(program.currentIndex)||0,currentWorkoutDrafts:copy(asObject(program.currentWorkoutDrafts)),actualDates:copy(asObject(program.actualDates)),dateAnchors:copy(asObject(program.dateAnchors)),completed:copy(asObject(program.completed)),currentSessionNote:program.currentSessionNote||'',noteArchive:copy(asArray(program.noteArchive))};
+        target.programs[programId]={days:copy(asArray(program.days||program.plan)),workoutLogs:copy(getProgramLogs(program)),currentWorkoutId:program.currentWorkoutId||'',currentIndex:Number(program.currentIndex)||0,currentWorkoutDrafts:copy(asObject(program.currentWorkoutDrafts)),currentWorkoutLogDraft:copy(program.currentWorkoutLogDraft||null),actualDates:copy(asObject(program.actualDates)),dateAnchors:copy(asObject(program.dateAnchors)),completed:copy(asObject(program.completed)),sessionStartedAt:copy(asObject(program.sessionStartedAt)),currentSessionNote:program.currentSessionNote||'',noteArchive:copy(asArray(program.noteArchive))};
       });
       result.profiles[profileId]=target;
     });
     return result;
   }
   function validateCompactedState(before,after){
-    if(JSON.stringify(criticalStatePayload(before))!==JSON.stringify(criticalStatePayload(after))) throw new Error('状态压缩失败：关键训练数据发生变化。');
+    if(JSON.stringify(criticalStatePayload(before))!==JSON.stringify(criticalStatePayload(after))) throw new StateIntegrityError('状态压缩失败：关键训练数据发生变化。');
     var beforeStats=collectStateIntegrityStats(before),afterStats=collectStateIntegrityStats(after);
     ['profiles','programs','workouts','workoutLogs','historyEntries','weightedEntries','exerciseTemplates','warmupTemplates','currentWorkoutDrafts','currentDraftSets'].forEach(function(field){
-      if(beforeStats[field]!==afterStats[field])throw new Error('状态压缩失败：'+field+' 数量发生变化（'+beforeStats[field]+' → '+afterStats[field]+'）。');
+      if(beforeStats[field]!==afterStats[field])throw new StateIntegrityError('状态压缩失败：'+field+' 数量发生变化（'+beforeStats[field]+' → '+afterStats[field]+'）。');
     });
     return {before:beforeStats,after:afterStats};
   }
@@ -350,6 +363,7 @@
     options=options||{};
     root=root||global.trainingTrackerState;
     if(!root) return null;
+    var storedRaw=localStorage.getItem(ROOT_KEY),isRuntimeRoot=root===global.trainingTrackerState;
     if(!options.skipSync)syncProgram(getActiveProgram(root));
     root.schemaVersion=SCHEMA_VERSION;
     root.updatedAt=nowIso();
@@ -357,7 +371,6 @@
     validateCompactedState(root,compact);
     var serialized=JSON.stringify(compact);
     try{
-      var storedRaw=localStorage.getItem(ROOT_KEY);
       if(storedRaw&&!localStorage.getItem(PRE_V6_BACKUP_KEY)){
         var storedVersion=0;
         try{storedVersion=Number(JSON.parse(storedRaw).schemaVersion)||0;}catch(ignore){}
@@ -366,7 +379,12 @@
       localStorage.setItem(ROOT_KEY,serialized);
     }
     catch(error){
-      if(isStorageQuotaError(error))throw new StorageQuotaError('浏览器本地存储空间不足，训练数据没有写入。',{attemptedBytes:utf8Bytes(serialized),usage:estimateStorageUsage()});
+      if(isStorageQuotaError(error)){
+        if(isRuntimeRoot&&storedRaw){
+          try{bindRuntime(migrateRootTransaction(JSON.parse(storedRaw),[],runtimeBuiltinWarmups));}catch(rollbackError){console.error('存储失败后的运行时回滚失败',rollbackError);}
+        }
+        throw new StorageQuotaError('存储空间不足，本次修改未保存。',{attemptedBytes:utf8Bytes(serialized),usage:estimateStorageUsage()});
+      }
       throw error;
     }
     return root;
@@ -524,6 +542,8 @@
   global.TRAINING_TRACKER_PRE_V6_BACKUP_KEY=PRE_V6_BACKUP_KEY;
   global.TRAINING_TRACKER_SCHEMA_VERSION=SCHEMA_VERSION;
   global.StorageQuotaError=StorageQuotaError;
+  global.StateIntegrityError=StateIntegrityError;
+  global.MigrationError=MigrationError;
   global.isStorageQuotaError=isStorageQuotaError;
   global.createStableId=makeId;
   global.normalizeSetEntity=normalizeSet;

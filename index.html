@@ -198,6 +198,15 @@
         <div class="small">本机保留了升级前安全快照。仅在升级后数据异常时使用。</div>
         <button type="button" onclick="restoreUpgradeBackupFromSettings()">恢复升级前本地数据</button>
       </div>
+      <div class="maintenanceRecovery">
+        <div id="dateIntegrityDiagnostic" class="small">点击检查训练数据完整性，不会修改任何数据。</div>
+        <div class="row" style="margin-top:8px">
+          <button type="button" onclick="checkTrainingDataIntegrity()">检查训练数据完整性</button>
+          <button id="previewDateRepairButton" type="button" class="hidden" onclick="previewDateStateRepair()">预览修复</button>
+          <button id="executeDateRepairButton" type="button" class="bad hidden" onclick="executeDateStateRepair()">执行安全修复</button>
+        </div>
+        <pre id="dateRepairPreview" class="hidden"></pre>
+      </div>
     </div>
   </section>
 
@@ -389,14 +398,16 @@
 </div>
 <div id="timerConfirmMask" class="timerConfirmMask"><div class="timerConfirmBox"><h3 id="timerConfirmTitle">倒计时结束</h3><p id="timerConfirmBody">可以开始下一步。</p><button type="button" onclick="closeTimerConfirm()">确认</button></div></div>
 <script src="prescription.js?v=20260829-structured-v1"></script>
-<script src="storage.js?v=20260829-storage-rescue-1"></script>
+<script src="date-integrity.js?v=20260829-date-integrity-1"></script>
+<script src="execution-reconciler.js?v=20260829-reconciler-1"></script>
+<script src="storage.js?v=20260829-date-integrity-1"></script>
 <script src="templates.js?v=20260829-structured-v1"></script>
 <script src="parser.js?v=20260829-storage-rescue-1"></script>
 <script src="history.js?v=20260829-structured-v1"></script>
 <script src="import-validator.js?v=20260829-structured-v1"></script>
 <script src="plan-compiler.js?v=20260829-handoff-v1"></script>
-<script src="importer.js?v=20260829-storage-rescue-1"></script>
-<script src="program-store.js?v=20260829-storage-rescue-1"></script>
-<script src="app.js?v=20260829-storage-rescue-1"></script>
+<script src="importer.js?v=20260829-date-integrity-1"></script>
+<script src="program-store.js?v=20260829-date-integrity-1"></script>
+<script src="app.js?v=20260829-date-integrity-1"></script>
 </body>
 </html>

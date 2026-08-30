@@ -46,6 +46,8 @@ export function loadScript(context,file){
 export function loadStorage(storage=new MemoryStorage()){
   const context=createContext(storage);
   loadScript(context,'prescription.js');
+  loadScript(context,'date-integrity.js');
+  loadScript(context,'execution-reconciler.js');
   loadScript(context,'storage.js');
   loadScript(context,'program-store.js');
   return context;
@@ -55,6 +57,8 @@ export function loadImporter(storage=new MemoryStorage()){
   const context=createContext(storage);
   context.normalizeExcelRows=rows=>(rows||[]).filter(row=>row.some(cell=>String(cell??'').trim())).map(row=>row.map(cell=>String(cell??'').trim()));
   loadScript(context,'prescription.js');
+  loadScript(context,'date-integrity.js');
+  loadScript(context,'execution-reconciler.js');
   loadScript(context,'parser.js');
   loadScript(context,'import-validator.js');
   loadScript(context,'plan-compiler.js');
@@ -67,6 +71,8 @@ export function loadTrainingModules(storage=new MemoryStorage()){
   const context=createContext(storage);
   context.normalizeExcelRows=rows=>(rows||[]).filter(row=>row.some(cell=>String(cell??'').trim())).map(row=>row.map(cell=>String(cell??'').trim()));
   loadScript(context,'prescription.js');
+  loadScript(context,'date-integrity.js');
+  loadScript(context,'execution-reconciler.js');
   loadScript(context,'storage.js');
   loadScript(context,'parser.js');
   loadScript(context,'history.js');
