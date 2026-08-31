@@ -10,7 +10,25 @@
     if(typeof global.normalizeTemplateKey==='function') return global.normalizeTemplateKey(name);
     return String(name||'').normalize?String(name||'').normalize('NFKC').trim().replace(/\s+/g,' ').replace(/（/g,'(').replace(/）/g,')').toLowerCase():String(name||'').trim().toLowerCase();
   }
+  function comparableHistoryName(name){return normalized(name).replace(/\([^)]*\)/g,'').replace(/\s+/g,' ').trim();}
   function logsFrom(src){src=src||{};var logs=src.workoutLogs||src.logs||src.trainingLogs||src.history||src.completedWorkouts||[];return Array.isArray(logs)?logs:[];}
+  function activeProfile(root){
+    root=root||{};var profiles=root.profiles||{},profileId=root.activeProfileId;
+    return profiles[profileId]||null;
+  }
+  function collectAllWorkoutLogs(root){
+    var profile=activeProfile(root);if(!profile)return [];
+    var result=[];Object.keys(profile.programs||{}).forEach(function(programId){
+      var program=profile.programs[programId]||{},programName=program.name||program.sourceFileName||'未命名计划';
+      logsFrom(program).forEach(function(log){result.push(Object.assign({},log,{programId:programId,programName:programName}));});
+    });
+    return result;
+  }
+  function collectProgramWorkoutLogs(root,programId){
+    var profile=activeProfile(root),program=profile&&profile.programs&&profile.programs[programId];if(!program)return [];
+    var programName=program.name||program.sourceFileName||'未命名计划';
+    return logsFrom(program).map(function(log){return Object.assign({},log,{programId:programId,programName:programName});});
+  }
   function itemsFrom(log){var items=(log&&(log.entries||log.exercises||log.training||log.items))||[];return Array.isArray(items)?items:[];}
   function logDate(log){return (log&&(log.actualDate||log.date||log.performedDate||log.completedAt||log.createdAt))||'';}
   function logIndex(log){if(!log)return undefined;if(typeof log.planIndex==='number')return log.planIndex;if(typeof log.index==='number')return log.index;return log.workoutIndex;}
@@ -24,7 +42,7 @@
       itemsFrom(log).forEach(function(item){
         if(item.type&&!/主训练/.test(String(item.type))) return;
         var rawName=item.trackingName||item.trackName||item.name||item.originalName,key=normalized(rawName);if(!key)return;
-        if(!grouped[key]) grouped[key]={date:date,workoutTitle:title,workoutIndex:workoutIndex,sourceLogIndex:li,name:rawName,originalName:item.originalName||rawName,trackName:item.trackName||item.trackingName||rawName,sets:[],note:item.note||''};
+        if(!grouped[key]) grouped[key]={date:date,workoutTitle:title,workoutIndex:workoutIndex,sourceLogIndex:li,programId:log.programId||'',programName:log.programName||'',name:rawName,originalName:item.originalName||rawName,trackName:item.trackName||item.trackingName||rawName,sets:[],note:item.note||''};
         var itemSets=Array.isArray(item.sets)?item.sets:[item];
         itemSets.forEach(function(set,index){
           set=set||{};var weightKg=Number(set.weightKg||kg(set.weight,set.unit||'kg')||0);
@@ -43,7 +61,16 @@
     else if(!state.exerciseHistory||!Object.keys(state.exerciseHistory).length) state.exerciseHistory={};
     return state.exerciseHistory||{};
   }
+  function findExerciseHistoryAcrossPrograms(root,name){
+    var key=normalized(name);if(!key)return [];
+    var history=buildExerciseHistoryFromLogs(collectAllWorkoutLogs(root));
+    var records=(history[key]||[]).slice();
+    if(!records.length){var comparable=comparableHistoryName(name);Object.keys(history).forEach(function(historyKey){if(comparableHistoryName(historyKey)===comparable)records=records.concat(history[historyKey]||[]);});}
+    return records.sort(function(a,b){var da=String(a.date||''),db=String(b.date||'');return da===db?(b.sourceLogIndex||0)-(a.sourceLogIndex||0):db.localeCompare(da);});
+  }
   function recordsFor(name){
+    var root=global.trainingTrackerState;
+    if(root&&root.profiles)return findExerciseHistoryAcrossPrograms(root,name);
     var key=normalized(name),history=ensureExerciseHistory(),records=(history[key]||[]).slice();
     if(!records.length&&global.state){global.state.exerciseHistory=buildExerciseHistoryFromLogs(logsFrom(global.state));records=(global.state.exerciseHistory[key]||[]).slice();}
     return records.sort(function(a,b){var da=String(a.date||''),db=String(b.date||'');return da===db?(b.sourceLogIndex||0)-(a.sourceLogIndex||0):db.localeCompare(da);});
@@ -64,7 +91,7 @@
   function renderExerciseHistoryModal(){
     var modal=global.document&&document.getElementById('exerciseHistoryModal'),list=global.document&&document.getElementById('exerciseHistoryList'),title=global.document&&document.getElementById('exerciseHistoryTitle'),more=global.document&&document.getElementById('exerciseHistoryMore');if(!modal||!list)return;
     var records=recordsFor(currentName),visible=records.slice(0,visibleCount);if(title)title.textContent=currentName+'｜训练历史';
-    list.innerHTML=visible.length?visible.map(function(record){return '<article class="exerciseHistoryRecord"><div class="exerciseHistoryRecordHead"><b>'+esc(record.date||'日期未知')+'</b><span>'+(record.workoutIndex!==undefined?'#'+esc(Number(record.workoutIndex)+1)+'｜':'')+esc(record.workoutTitle||'')+'</span></div><div>'+esc((record.sets||[]).map(displaySet).join('；'))+'</div>'+(record.note?'<p>'+esc(record.note)+'</p>':'')+'</article>';}).join(''):'<div class="small">还没有这个动作的训练记录。</div>';
+    list.innerHTML=visible.length?visible.map(function(record){return '<article class="exerciseHistoryRecord"><div class="exerciseHistoryRecordHead"><b>'+esc(record.date||'日期未知')+'</b><span>'+(record.programName?esc(record.programName)+'｜':'')+(record.workoutIndex!==undefined?'#'+esc(Number(record.workoutIndex)+1)+'｜':'')+esc(record.workoutTitle||'')+'</span></div><div>'+esc((record.sets||[]).map(displaySet).join('；'))+'</div>'+(record.note?'<p>'+esc(record.note)+'</p>':'')+'</article>';}).join(''):'<div class="small">还没有这个动作的训练记录。</div>';
     if(more){more.hidden=records.length<=visibleCount;more.textContent='加载更多（剩余 '+Math.max(0,records.length-visibleCount)+' 条）';}
   }
   function openExerciseHistory(name){currentName=String(name||'');visibleCount=pageSize;var modal=document.getElementById('exerciseHistoryModal');if(modal)modal.classList.add('show');renderExerciseHistoryModal();}
@@ -72,12 +99,16 @@
   function loadMoreExerciseHistory(){visibleCount+=pageSize;renderExerciseHistoryModal();}
 
   global.getBackupLogsFromState=logsFrom;
+  global.collectAllWorkoutLogs=collectAllWorkoutLogs;
+  global.collectProgramWorkoutLogs=collectProgramWorkoutLogs;
   global.getExerciseItemsFromLog=itemsFrom;
   global.getLogDate=logDate;
   global.getLogIndex=logIndex;
   global.hasMeaningfulSet=meaningful;
   global.buildExerciseHistoryFromLogs=buildExerciseHistoryFromLogs;
   global.ensureExerciseHistory=ensureExerciseHistory;
+  global.findExerciseHistoryAcrossPrograms=findExerciseHistoryAcrossPrograms;
+  global.comparableExerciseHistoryName=comparableHistoryName;
   global.getExerciseHistoryRecords=recordsFor;
   global.getLastExercisePerformance=getLastExercisePerformance;
   global.lastReferenceHTML=lastReferenceHTML;

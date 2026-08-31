@@ -10,6 +10,7 @@ try{ if(dedupeTemplateLibraries()) state.templateDedupePending=true; }catch(e){}
 let activeSet = null, timerLeft=180, timerBase=180, timerId=null;
 let rowTimers = {}; // 每一组都能独立显示自己的倒计时；实际同时只跑一个，避免训练时多个铃同时响。
 let activeTimerContext = null; // 用真实结束时间校准，切出手机后回来不丢时间。
+var historyFilterValue='all';
 
 function inferExerciseCategory(name){
   var n=String(name||'').toLowerCase();
@@ -628,7 +629,7 @@ function scrollCalendarToCurrent(){
 }
 
 function clearDateAnchors(){if(confirm('确认清空手动排期日期？已实际训练过的 actualDate 会保留，不会清掉训练日志日期。')){state.dateAnchors=Object.assign({},trustedRuntimeDates().actualDates);refreshRuntimeDateIntegrity();saveState();rebuild();renderCalendar();}}
-function warmupFor(name){let w=WARMUPS.find(x=>x.name===name);return w? w.steps+"\n\n备注："+w.notes : '休息日：散步、轻拉伸、足弓激活即可。';}
+function warmupFor(name){let w=WARMUPS.find(x=>x.name===name);return w? w.steps+(w.notes?"\n\n备注："+w.notes:'') : '';}
 function workoutPurpose(w){
   let t=((w&&w['训练主题'])||'')+' '+((w&&w['热身模板'])||'')+' '+((w&&w['训练内容（组×次数/余力）'])||'');
   if(/上肢|卧推|胸|肩|背|下拉|划船|推举|三头|二头/.test(t)) return '胸训';
@@ -637,8 +638,14 @@ function workoutPurpose(w){
 }
 function defaultWarmupText(w){
   let purpose=workoutPurpose(w);
+  if(typeof resolveWorkoutWarmup==='function')return resolveWorkoutWarmup(w,{templates:WARMUPS,customText:state.customWarmups[purpose]||'',sharedSourceBlocks:state.sharedSourceBlocks||{}}).text;
   if(w && w['导入热身内容']) return w['导入热身内容'];
   return state.customWarmups[purpose] || warmupFor(w['热身模板']).replace(/备注：.+$/s,'').trim();
+}
+function workoutWarmupResolution(w){
+  var purpose=workoutPurpose(w),custom=state.customWarmups[purpose]||'';
+  if(typeof resolveWorkoutWarmup==='function')return resolveWorkoutWarmup(w,{templates:WARMUPS,customText:custom,sharedSourceBlocks:state.sharedSourceBlocks||{}});
+  var fallback=defaultWarmupText(w);return {kind:fallback?'legacy-template':'none',text:fallback,items:[]};
 }
 function autoSaveWarmupDraft(){
   let w=getWorkout(), key=workoutWarmupKey(), txt=document.getElementById('warmupInput').value;
@@ -647,8 +654,10 @@ function autoSaveWarmupDraft(){
 function loadDefaultWarmup(){
   let w=getWorkout(); let purpose=workoutPurpose(w); let key=workoutWarmupKey();
   delete state.customWarmups[key];
-  document.getElementById('warmupInput').value = state.customWarmups[purpose] || warmupFor(w['热身模板']).replace(/备注：.+$/s,'').trim();
-  saveState(); parseAndRenderWarmups(false);
+  var resolved=workoutWarmupResolution(w);
+  document.getElementById('warmupInput').value = resolved.text;
+  var resolvedItems=resolved.kind==='structured'?resolved.items:((resolved.kind==='rest'||resolved.kind==='none')?[]:null);
+  saveState(); parseAndRenderWarmups(false,resolvedItems);
 }
 function saveWarmupTemplate(){
   let w=getWorkout(), purpose=workoutPurpose(w), txt=document.getElementById('warmupInput').value.trim();
@@ -720,9 +729,9 @@ function warmupCardHTML(ex,ei){
   return html;
 }
 function escapeHtml(x){return String(x??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
-function parseAndRenderWarmups(showAlert){
+function parseAndRenderWarmups(showAlert,structuredItems){
   let box=document.getElementById('warmupInput'); if(!box) return [];
-  let items=parseWarmupItems(box.value); let html='';
+  let items=Array.isArray(structuredItems)?structuredItems:parseWarmupItems(box.value); let html='';
   items.forEach((ex,ei)=>{html+=warmupCardHTML(ex,ei);});
   document.getElementById('warmupExercises').innerHTML=html || '<pre>暂无热身项目。可以点“手动添加项目”。</pre>';
   bindTrainingDataInputs(document);
@@ -1646,12 +1655,7 @@ function autoSeedTemplatesFromPlan(){
 function logForExercise(name){
   var key=normalizeExerciseName(name);
   if(!key) return [];
-  var history=ensureExerciseHistory();
-  var records=history[key]||[];
-  if(!records.length){
-    state.exerciseHistory=buildExerciseHistoryFromLogs(state.logs||[]);
-    records=state.exerciseHistory[key]||[];
-  }
+  var records=typeof getExerciseHistoryRecords==='function'?getExerciseHistoryRecords(name):[];
   var flat=[];
   records.forEach(function(r){
     (r.sets||[]).forEach(function(st){
@@ -1795,10 +1799,13 @@ function rebuild(){
   document.getElementById('restNotice').textContent = '组间规则：'+w['组间休息/规则'];
   renderStructuredWorkoutInfo(w);
   let purpose=workoutPurpose(w), warmKey=workoutWarmupKey();
-  document.getElementById('warmupPurpose').textContent = '自动分类：'+purpose+'｜可编辑成项目，支持每组独立计时。';
-  document.getElementById('warmupInput').value = state.customWarmups[warmKey] || defaultWarmupText(w);
-  document.getElementById('warmupBox').textContent = warmupFor(w['热身模板']);
-  parseAndRenderWarmups(false);
+  var workoutCustomWarmup=state.customWarmups[warmKey]||'',warmupResolution=workoutCustomWarmup?{kind:'custom',text:workoutCustomWarmup,items:[]}:workoutWarmupResolution(w);
+  var warmupSourceLabel={structured:'结构化计划热身',rest:'休息日恢复说明',custom:'自定义热身','legacy-template':'旧热身模板',none:'未设置热身'}[warmupResolution.kind]||'热身';
+  document.getElementById('warmupPurpose').textContent = warmupSourceLabel+'｜自动分类：'+purpose+'｜可编辑成项目，支持每组独立计时。';
+  document.getElementById('warmupInput').value = warmupResolution.text;
+  document.getElementById('warmupBox').textContent = warmupResolution.text || '本日未设置热身';
+  var warmupItems=warmupResolution.kind==='structured'?warmupResolution.items:((warmupResolution.kind==='rest'||warmupResolution.kind==='none')?[]:null);
+  parseAndRenderWarmups(false,warmupItems);
   renderNoteInputs();
   renderCompleteDebugStatus();
   var html='';
@@ -2417,6 +2424,15 @@ function renderProgramSwitcher(){
     return '<option value="'+escapeHtml(programId)+'"'+(trainingTrackerState.activeProgramId===programId?' selected':'')+'>'+escapeHtml(program.name||'未命名计划')+'</option>';
   }).join('');
 }
+function setHistoryFilter(value){historyFilterValue=String(value||'all');renderHistory();}
+function renderHistoryFilter(){
+  var select=document.getElementById('historyProgramFilter');if(!select)return;
+  var profile=getActiveProfile(),programs=profile&&profile.programs||{},activeId=trainingTrackerState.activeProgramId;
+  var options=['<option value="all">全部计划</option>','<option value="current">当前计划｜'+escapeHtml(state.name||'未命名计划')+'</option>'];
+  Object.keys(programs).forEach(function(programId){if(programId===activeId)return;var program=programs[programId];options.push('<option value="program:'+escapeHtml(programId)+'">'+escapeHtml(program.name||'未命名计划')+'</option>');});
+  select.innerHTML=options.join('');
+  if(Array.prototype.some.call(select.options,function(option){return option.value===historyFilterValue;}))select.value=historyFilterValue;else{historyFilterValue='all';select.value='all';}
+}
 function switchProgramFromSelect(programId){
   try{
     if(typeof syncCurrentWorkoutFormToState==='function'&&document.getElementById('exercises')) syncCurrentWorkoutFormToState();
@@ -2491,9 +2507,14 @@ function renderCalendar(){
   if(hint) hint.textContent='文字标签版：每张卡顶部直接显示训练类型。黄色=当前应练，蓝色=当前选中。实际训练日期：'+anchors;
 }
 function renderHistory(){
-  if(!state.logs.length){document.getElementById('historyTable').innerHTML='<p class="small">暂无训练记录。</p>';return}
-  let rows=[]; state.logs.slice().sort(function(a,b){return String(getLogDate(b)).localeCompare(String(getLogDate(a)));}).forEach(l=>{var d=getLogDate(l);var entries=getExerciseItemsFromLog(l);rows.push(`<tr><td>${displayDateLabel(d)}</td><td>#${(getLogIndex(l)??0)+1}</td><td>${escapeHtml(l.title||l.workoutTitle||'')}</td><td>${escapeHtml(l.status||'已完成')}</td><td>${entries.length}</td><td>${Math.round(entries.reduce((a,e)=>a+(parseFloat(e.weight)||0)*(parseFloat(e.reps)||0),0))}</td><td>${escapeHtml(l.note||'')}</td></tr>`)});
-  document.getElementById('historyTable').innerHTML=`<table><thead><tr><th>实际日期</th><th>训练序号</th><th>训练标题</th><th>完成状态</th><th>记录组数</th><th>总量</th><th>备注</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+  renderHistoryFilter();
+  var allLogs=typeof collectAllWorkoutLogs==='function'?collectAllWorkoutLogs(trainingTrackerState):(state.logs||[]),currentLogs=(state.logs||[]).map(function(log){return Object.assign({},log,{programId:state.programId,programName:state.name||'当前计划'});}),logs=allLogs;
+  if(historyFilterValue==='current')logs=currentLogs;
+  else if(historyFilterValue.indexOf('program:')===0){var programId=historyFilterValue.slice(8);logs=allLogs.filter(function(log){return log.programId===programId;});}
+  var summary=document.getElementById('historySummary');if(summary)summary.textContent='全部历史：'+allLogs.length+'｜当前计划：'+currentLogs.length;
+  var table=document.getElementById('historyTable');if(!logs.length){table.innerHTML='<p class="small">当前筛选范围暂无训练记录。全部历史仍保存在各自原计划中。</p>';return;}
+  let rows=[]; logs.slice().sort(function(a,b){return String(getLogDate(b)).localeCompare(String(getLogDate(a)));}).forEach(l=>{var d=getLogDate(l);var entries=getExerciseItemsFromLog(l);rows.push(`<tr><td>${displayDateLabel(d)}</td><td>${escapeHtml(l.programName||'')}</td><td>#${(getLogIndex(l)??0)+1}</td><td>${escapeHtml(l.title||l.workoutTitle||'')}</td><td>${escapeHtml(l.status||'已完成')}</td><td>${entries.length}</td><td>${Math.round(entries.reduce((a,e)=>a+(parseFloat(e.weight)||0)*(parseFloat(e.reps)||0),0))}</td><td>${escapeHtml(l.note||'')}</td></tr>`)});
+  table.innerHTML=`<table><thead><tr><th>实际日期</th><th>所属计划</th><th>训练序号</th><th>训练标题</th><th>完成状态</th><th>记录组数</th><th>总量</th><th>备注</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
 }
 function formatStorageBytes(bytes){bytes=Number(bytes)||0;if(bytes>=1024*1024)return (bytes/(1024*1024)).toFixed(2)+' MB';if(bytes>=1024)return (bytes/1024).toFixed(1)+' KB';return bytes+' B';}
 function renderStorageMaintenance(){
@@ -2816,7 +2837,7 @@ function currentMainWorkoutHasWeight(){
 
 function goCurrentPending(){ state.selectedCalendarIndex=state.currentIndex; saveState(); renderCalendar(); setTimeout(function(){scrollCalendarToCurrent();},60); }
 function exportData(){let blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});let a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='training-log.json';a.click();}
-function clearLogs(){if(confirm('确认清空所有训练记录？')){state.logs=[];state.workoutLogs=[];state.exerciseHistory={};state.completed={};state.currentIndex=0;state.dateAnchors={};state.actualDates={};state.lastActualIndex=null;state.lastActualDate='';saveState();rebuild();renderHistory();}}
+function clearLogs(){if(confirm('确认清空当前计划“'+(state.name||'未命名计划')+'”的训练记录？其他计划的日志和历史重量不会删除。')){state.logs=[];state.workoutLogs=[];state.exerciseHistory={};state.completed={};state.currentIndex=0;state.dateAnchors={};state.actualDates={};state.lastActualIndex=null;state.lastActualDate='';saveState();rebuild();renderHistory();}}
 
 
 /* ===== 手机导航稳定版 + 训练日顺序移动 ===== */

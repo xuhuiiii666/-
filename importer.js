@@ -376,9 +376,10 @@ function detectAndParseImport(text){
   var rows=parseDelimited(text);
   if(!rows.length) throw new ImportError('没有读取到有效内容。请复制包含表头的表格区域。','EMPTY_INPUT');
   if(typeof detectLongFormDailyGrid==='function'&&detectLongFormDailyGrid(rows,'')){
-    return parseLongFormDailyGrid(rows,{fileName:'复制粘贴内容',sheetName:'复制粘贴'});
+    var longForm=parseLongFormDailyGrid(rows,{fileName:'复制粘贴内容',sheetName:'复制粘贴'});
+    longForm.adapter=importAdapterLabel(longForm);longForm.routeWarnings=longFormRouteWarnings(longForm);return longForm;
   }
-  return parseDailyGridSheet(rows, {id:'clipboard', label:'复制粘贴'});
+  var legacy=parseDailyGridSheet(rows, {id:'clipboard', label:'复制粘贴'});legacy.adapter=importAdapterLabel(legacy);return legacy;
 }
 
 function sheetNameBlocked(name){
@@ -486,11 +487,25 @@ function validateImportedPlan(plan){
 function detectStructuredFormat(workbook){
   return !!(workbook&&Array.isArray(workbook.SheetNames)&&workbook.SheetNames.indexOf(STRUCTURED_DATA_SHEET)>=0);
 }
+function importAdapterLabel(parsed){
+  if(parsed&&parsed.format==='structured-v1')return 'Structured Import v1';
+  if(parsed&&parsed.format==='long-form-daily-v1')return 'Long-form Daily Grid';
+  return 'Legacy Import';
+}
+function importBuildVersion(){return typeof APP_BUILD_VERSION!=='undefined'&&APP_BUILD_VERSION?String(APP_BUILD_VERSION):'unknown';}
+function longFormRouteWarnings(parsed){
+  if(!parsed||parsed.format!=='long-form-daily-v1')return [];
+  var semantic=parsed.semanticStats||{},types=semantic.types||{},activeDays=(types['力量训练']||0)+(types['力量＋有氧']||0)+(types['攀岩']||0)+(types['减载训练']||0)+(types['减载攀岩']||0);
+  var activities=(semantic.warmups||0)+(semantic.cardio||0)+(semantic.climbing||0),warnings=[];
+  if(activeDays>0&&!(semantic.warmups>0))warnings.push('该文件疑似未进入 Long-form 解析：structured warmup = 0，请勿正式导入。');
+  if(activeDays>0&&!(activities>0))warnings.push('该文件疑似未进入 Long-form 解析：activities = 0，请勿正式导入。');
+  return warnings;
+}
 function parseWorkbookToImport(workbook, file){
   try{
     if(detectStructuredFormat(workbook)){
       var structuredReport=validateStructuredWorkbook(workbook,rowsFromSheet);
-      return createStandardProgram(structuredReport,file);
+      var structured=createStandardProgram(structuredReport,file);structured.adapter=importAdapterLabel(structured);return structured;
     }
     var planType = detectPlanType(file || workbook);
     if(planType.id === 'unknown'){
@@ -505,6 +520,8 @@ function parseWorkbookToImport(workbook, file){
         throw new ImportValidationError('Long-form 训练计划存在未结构化内容或身份错误，请先查看语义损失警告。','LONG_FORM_SEMANTIC_LOSS',{report:{format:longForm.format,stats:longForm.semanticStats,warnings:longForm.semanticWarnings,errors:semanticErrors}});
       }
       longForm.candidates=selected.candidates;
+      longForm.adapter=importAdapterLabel(longForm);
+      longForm.routeWarnings=longFormRouteWarnings(longForm);
       return longForm;
     }
     var parsed = parseDailyGridSheet(selected.rows, planType);
@@ -513,6 +530,7 @@ function parseWorkbookToImport(workbook, file){
     parsed.source = 'file';
     parsed.sourceFileName=file&&file.name||'';
     parsed.candidates = selected.candidates;
+    parsed.adapter=importAdapterLabel(parsed);
     return parsed;
   }catch(error){throw asImportError(error);}
 }
@@ -538,7 +556,7 @@ function previewImportPlan(){
     lastImportPreview=parsed;
     var first=parsed.plan[0]||{};
     var duplicateCount=(parsed.validation&&parsed.validation.duplicateDays&&parsed.validation.duplicateDays.length)||0;
-    out.textContent='识别格式：'+parsed.type+'\n训练日数量：'+parsed.plan.length+'\n热身模板数量：'+(parsed.warmups?parsed.warmups.length:'沿用表内热身模板')+'\n同日重复动作检查：'+(duplicateCount?('发现 '+duplicateCount+' 天，请检查预览'):'未发现')+'\n\n第一条预览：\n'+JSON.stringify(first,null,2).slice(0,1200);
+    out.textContent='导入方式：'+importAdapterLabel(parsed)+'\nBuild：'+importBuildVersion()+'\n识别格式：'+parsed.type+'\n训练日数量：'+parsed.plan.length+'\n热身模板数量：'+(parsed.warmups?parsed.warmups.length:'沿用表内热身模板')+'\n同日重复动作检查：'+(duplicateCount?('发现 '+duplicateCount+' 天，请检查预览'):'未发现')+'\n\n第一条预览：\n'+JSON.stringify(first,null,2).slice(0,1200);
   }catch(e){
     lastImportPreview=null;
     out.textContent='识别失败：'+e.message;
@@ -590,6 +608,8 @@ function importPrecheckText(parsed,fileName){
     var semantic=parsed.semanticStats||{},types=semantic.types||{};
     var lines=[
       '文件：'+(fileName||parsed.sourceFileName||''),
+      '导入方式：'+importAdapterLabel(parsed),
+      'Build：'+importBuildVersion(),
       '格式：Long-form Daily Grid｜语义适配 v1',
       'Workout：'+(semantic.workouts||0),
       '力量训练：'+(types['力量训练']||0)+'｜力量＋有氧：'+(types['力量＋有氧']||0)+'｜完全休息：'+(types['完全休息']||0),
@@ -600,6 +620,7 @@ function importPrecheckText(parsed,fileName){
       '未识别内容块：'+(semantic.unrecognizedBlocks||0)
     ];
     (parsed.semanticWarnings||[]).forEach(function(item){lines.push('语义损失警告：'+item);});
+    (parsed.routeWarnings||[]).forEach(function(item){lines.push('路由警告：'+item);});
     var validation=parsed.validation||{},errors=validation.errors||[],warnings=(validation.warnings||[]).concat(parsed.semanticWarnings||[]);
     lines.push('validation：'+errors.length+' errors / '+warnings.length+' warnings');
     lines=lines.concat(importStorageEstimateLines(parsed).lines);
@@ -608,9 +629,9 @@ function importPrecheckText(parsed,fileName){
   }
   var report=parsed&&parsed.report;
   if(!report){
-    return '文件：'+(fileName||parsed&&parsed.sourceFileName||'粘贴内容')+'\n格式：Legacy 兼容格式\n✓ 旧版解析成功\n训练日：'+((parsed&&parsed.plan&&parsed.plan.length)||0)+'\n严重错误：0';
+    return '文件：'+(fileName||parsed&&parsed.sourceFileName||'粘贴内容')+'\n导入方式：'+importAdapterLabel(parsed)+'\nBuild：'+importBuildVersion()+'\n格式：Legacy 兼容格式\n✓ 旧版解析成功\n训练日：'+((parsed&&parsed.plan&&parsed.plan.length)||0)+'\n严重错误：0';
   }
-  var lines=['文件：'+(fileName||parsed.sourceFileName||''),'格式：'+report.format,'训练日：'+report.stats.workouts+'｜动作：'+report.stats.exercises+'｜计划组：'+report.stats.sets+'｜特殊组：'+report.stats.specialSets];
+  var lines=['文件：'+(fileName||parsed.sourceFileName||''),'导入方式：'+importAdapterLabel(parsed),'Build：'+importBuildVersion(),'格式：'+report.format,'训练日：'+report.stats.workouts+'｜动作：'+report.stats.exercises+'｜计划组：'+report.stats.sets+'｜特殊组：'+report.stats.specialSets];
   (report.checks||[]).forEach(function(item){lines.push('✓ '+item);});
   (report.warnings||[]).forEach(function(item){lines.push('提醒：'+item);});
   (report.errors||[]).forEach(function(item){lines.push('错误：'+item);});
@@ -621,7 +642,7 @@ function renderImportPrecheck(parsed,fileName,error){
   var box=document.getElementById('importPrecheck');if(!box) return;
   var report=error&&(error.report||(error.details&&error.details.report));
   if(error&&report) parsed={report:report,sourceFileName:fileName||''};
-  box.textContent=error&&!report?('文件：'+(fileName||'')+'\n识别失败：'+(error.message||error)+'\n严重错误：1'):importPrecheckText(parsed,fileName);
+  box.textContent=error&&!report?('文件：'+(fileName||'')+'\nBuild：'+importBuildVersion()+'\n识别失败：'+(error.message||error)+'\n严重错误：1'):importPrecheckText(parsed,fileName);
   var previewProgram=null,exactDuplicate=null,similarSource=null;
   if(!error&&parsed){
     try{previewProgram=programFromParsedImport(parsed);}catch(ignore){}
@@ -634,12 +655,13 @@ function renderImportPrecheck(parsed,fileName,error){
   if(!error&&parsed&&parsed.format==='long-form-daily-v1'){
     try{storageEstimate=estimateImportStorage(parsed);}catch(ignore){}
   }
-  box.classList.toggle('blocked',!!error||!!(report&&report.errors&&report.errors.length));
+  box.classList.toggle('blocked',!!error||!!(report&&report.errors&&report.errors.length)||!!(parsed&&parsed.routeWarnings&&parsed.routeWarnings.length));
   box.classList.toggle('storageWarning',!!storageEstimate&&storageEstimate.warningLevel==='warning');
   box.classList.toggle('storageStrongWarning',!!storageEstimate&&storageEstimate.warningLevel==='strong');
 }
 function programFromImportPreview(){
   if(!lastImportPreview) previewImportPlan();
+  if(lastImportPreview&&lastImportPreview.routeWarnings&&lastImportPreview.routeWarnings.length)throw new ImportValidationError(lastImportPreview.routeWarnings.join('\n'),'LONG_FORM_ROUTE_SUSPECT',{report:{format:lastImportPreview.format,errors:lastImportPreview.routeWarnings,warnings:[]}});
   return programFromParsedImport(lastImportPreview);
 }
 function refreshAfterProgramImport(message){
@@ -768,8 +790,8 @@ function importExcelFile(file){
       renderImportPrecheck(parsed,file.name);
       var first=parsed.plan[0]||{};
       var duplicateCount=(parsed.validation&&parsed.validation.duplicateDays&&parsed.validation.duplicateDays.length)||0;
-      if(status) status.textContent='已读取：'+file.name+'｜工作表：'+(parsed.sheetName||'自动识别')+'｜训练日 '+parsed.plan.length+' 天';
-      if(out) out.textContent='识别格式：'+parsed.type+'\n来源文件：'+file.name+'\n实际导入工作表：'+(parsed.sheetName||'自动识别')+'\n工作表候选排序：'+(parsed.candidates?parsed.candidates.join(' → '):'')+'\n训练日数量：'+parsed.plan.length+'\n热身模板数量：'+(parsed.warmups?parsed.warmups.length:'沿用表内热身模板')+'\n同日重复动作检查：'+(duplicateCount?('发现 '+duplicateCount+' 天，请先检查'):'未发现')+'\n\n第一天主题：'+(first['训练主题']||'')+'\n\n第一天热身内容：\n'+String(first['导入热身内容']||'').slice(0,500)+'\n\n第一天主训练内容：\n'+String(first['训练内容（组×次数/余力）']||'').slice(0,900)+'\n\n确认没问题后，点「导入为新的训练计划」。';
+      if(status) status.textContent='已读取：'+file.name+'｜导入方式：'+importAdapterLabel(parsed)+'｜工作表：'+(parsed.sheetName||'自动识别')+'｜训练日 '+parsed.plan.length+' 天';
+      if(out) out.textContent='导入方式：'+importAdapterLabel(parsed)+'\nBuild：'+importBuildVersion()+'\n识别格式：'+parsed.type+'\n来源文件：'+file.name+'\n实际导入工作表：'+(parsed.sheetName||'自动识别')+'\n工作表候选排序：'+(parsed.candidates?parsed.candidates.join(' → '):'')+'\n训练日数量：'+parsed.plan.length+'\n热身模板数量：'+(parsed.warmups?parsed.warmups.length:'沿用表内热身模板')+'\n同日重复动作检查：'+(duplicateCount?('发现 '+duplicateCount+' 天，请先检查'):'未发现')+'\n\n第一天主题：'+(first['训练主题']||'')+'\n\n第一天热身内容：\n'+String(first['导入热身内容']||'').slice(0,500)+'\n\n第一天主训练内容：\n'+String(first['训练内容（组×次数/余力）']||'').slice(0,900)+'\n\n确认没问题后，点「导入为新的训练计划」。';
     }catch(err){
       lastImportPreview=null;
       renderImportPrecheck(null,file.name,err);

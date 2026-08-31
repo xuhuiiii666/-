@@ -4,7 +4,8 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>逐日训练器｜12周计划</title>
-<link rel="stylesheet" href="style.css?v=20260829-storage-rescue-1"/>
+<script>window.APP_BUILD_VERSION='20260831-longform-history-1';</script>
+<link rel="stylesheet" href="style.css?v=20260831-longform-history-1"/>
 </head>
 <body>
 <header class="appHeader">
@@ -141,9 +142,10 @@
   <section id="calendar" class="hidden">
     <div class="card calendarCard">
       <div class="calendarSticky simpleCalHead">
+        <div class="programSwitcherProminent"><span>当前计划：</span><select id="programSwitcher" aria-label="当前训练计划" onchange="switchProgramFromSelect(this.value)"></select></div>
         <div class="row between">
           <h3>训练队列</h3>
-          <div class="row calendarTools"><select id="programSwitcher" aria-label="当前训练计划" onchange="switchProgramFromSelect(this.value)"></select><input id="customWorkoutTitle" aria-label="新训练名称" placeholder="新训练名称"><button onclick="createCustomWorkoutFromInput()">新建我的训练</button><button onclick="goCurrentPending()">跳到当前应练</button><button onclick="rebuild()">刷新</button><button class="bad" onclick="clearDateAnchors()">清空日期修正</button></div>
+          <div class="row calendarTools"><input id="customWorkoutTitle" aria-label="新训练名称" placeholder="新训练名称"><button onclick="createCustomWorkoutFromInput()">新建我的训练</button><button onclick="goCurrentPending()">跳到当前应练</button><button onclick="rebuild()">刷新</button><button class="bad" onclick="clearDateAnchors()">清空日期修正</button></div>
         </div>
         <div class="simpleSelectedPanel">
           <div id="selectedCalInfo">未选中训练日</div>
@@ -168,7 +170,8 @@
 
   <section id="history" class="hidden">
     <div class="card">
-      <div class="row between"><h3>训练记录</h3><div class="row"><button onclick="exportData()">导出JSON</button><button class="bad" onclick="clearLogs()">清空记录</button></div></div>
+      <div class="row between"><h3>训练记录</h3><div class="row"><button onclick="exportData()">导出JSON</button><button class="bad" onclick="clearLogs()">清空当前计划记录</button></div></div>
+      <div class="historyControls"><label>查看范围 <select id="historyProgramFilter" onchange="setHistoryFilter(this.value)"><option value="all">全部计划</option></select></label><div id="historySummary" class="small">全部历史：0｜当前计划：0</div></div>
       <div id="historyTable"></div>
     </div>
   </section>
@@ -208,6 +211,7 @@
         </div>
         <pre id="dateRepairPreview" class="hidden"></pre>
       </div>
+      <div class="small" style="margin-top:12px">Build: <span id="appBuildVersion">读取中</span></div>
     </div>
   </section>
 
@@ -398,19 +402,21 @@
   </div>
 </div>
 <div id="timerConfirmMask" class="timerConfirmMask"><div class="timerConfirmBox"><h3 id="timerConfirmTitle">倒计时结束</h3><p id="timerConfirmBody">可以开始下一步。</p><button type="button" onclick="closeTimerConfirm()">确认</button></div></div>
-<script src="prescription.js?v=20260829-structured-v1"></script>
-<script src="date-integrity.js?v=20260829-date-integrity-1"></script>
-<script src="execution-reconciler.js?v=20260829-reconciler-1"></script>
-<script src="storage.js?v=20260830-import-transaction-1"></script>
-<script src="templates.js?v=20260829-structured-v1"></script>
-<script src="parser.js?v=20260829-storage-rescue-1"></script>
-<script src="history.js?v=20260829-structured-v1"></script>
-<script src="section-parser.js?v=20260830-long-form-v1"></script>
-<script src="long-form-daily-adapter.js?v=20260830-long-form-v1"></script>
-<script src="import-validator.js?v=20260829-structured-v1"></script>
-<script src="plan-compiler.js?v=20260829-handoff-v1"></script>
-<script src="importer.js?v=20260830-import-transaction-1"></script>
-<script src="program-store.js?v=20260830-import-transaction-1"></script>
-<script src="app.js?v=20260830-import-transaction-1"></script>
+<script src="prescription.js?v=20260831-longform-history-1"></script>
+<script src="date-integrity.js?v=20260831-longform-history-1"></script>
+<script src="execution-reconciler.js?v=20260831-longform-history-1"></script>
+<script src="storage.js?v=20260831-longform-history-1"></script>
+<script src="templates.js?v=20260831-longform-history-1"></script>
+<script src="parser.js?v=20260831-longform-history-1"></script>
+<script src="workout-view.js?v=20260831-longform-history-1"></script>
+<script src="history.js?v=20260831-longform-history-1"></script>
+<script src="section-parser.js?v=20260831-longform-history-1"></script>
+<script src="long-form-daily-adapter.js?v=20260831-longform-history-1"></script>
+<script src="import-validator.js?v=20260831-longform-history-1"></script>
+<script src="plan-compiler.js?v=20260831-longform-history-1"></script>
+<script src="importer.js?v=20260831-longform-history-1"></script>
+<script src="program-store.js?v=20260831-longform-history-1"></script>
+<script src="app.js?v=20260831-longform-history-1"></script>
+<script>document.getElementById('appBuildVersion').textContent=window.APP_BUILD_VERSION||'unknown';</script>
 </body>
 </html>

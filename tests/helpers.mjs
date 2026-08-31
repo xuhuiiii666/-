@@ -77,6 +77,7 @@ export function loadTrainingModules(storage=new MemoryStorage()){
   loadScript(context,'execution-reconciler.js');
   loadScript(context,'storage.js');
   loadScript(context,'parser.js');
+  loadScript(context,'workout-view.js');
   loadScript(context,'history.js');
   loadScript(context,'section-parser.js');
   loadScript(context,'long-form-daily-adapter.js');

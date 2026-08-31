@@ -935,6 +935,12 @@ textarea{width:100%;min-height:76px}.hidden{display:none}
 .templateCat{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:#13233f;border:1px solid #24436f;color:#b9d5ff;font-size:12px;font-weight:800;margin-right:6px}
 @media(max-width:640px){.templateControls{grid-template-columns:1fr}.templateControls input,.templateControls select{height:38px}.moduleTools{gap:6px}.moduleTools button{padding:6px 8px;font-size:12px}}
 
+.programSwitcherProminent{display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:9px 10px;border:1px solid #334155;border-radius:10px;background:#101923;font-weight:700}
+.programSwitcherProminent select{flex:1;min-width:0;font-weight:700}
+.historyControls{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0 12px}
+.historyControls label{display:flex;align-items:center;gap:8px;font-weight:700}
+@media(max-width:640px){.programSwitcherProminent{align-items:flex-start;flex-direction:column}.programSwitcherProminent select{width:100%}.historyControls{align-items:flex-start;flex-direction:column}.historyControls select{max-width:100%;width:100%}}
+
 /* ===== 2026-07 手机优先界面更新 ===== */
 :root{
   --bg:#090d12;

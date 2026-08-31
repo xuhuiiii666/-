@@ -30,25 +30,28 @@
   }
   function pad(value,size){return String(value).padStart(size||2,'0');}
   function rowValues(row){return Array.isArray(row)?row:[];}
-  function headerMap(headers){var map={};rowValues(headers).forEach(function(value,index){map[text(value).replace(/\s/g,'')]=index;});return map;}
+  function headerMap(headers){var map={};rowValues(headers).forEach(function(value,index){map[text(value).replace(/[\s\uFEFF]/g,'')]=index;});return map;}
   function valueAt(row,map,name){var index=map[String(name).replace(/\s/g,'')];return index===undefined?'':rowValues(row)[index];}
 
+  function longFormHeaderIndex(rows){
+    for(var i=0;i<Math.min(rows.length,20);i++){
+      var values=rowValues(rows[i]).map(function(value){return text(value).replace(/[\s\uFEFF]/g,'');});
+      if(REQUIRED_HEADERS.every(function(header){return values.indexOf(header.replace(/\s/g,''))>=0;}))return i;
+    }
+    return -1;
+  }
   function detectLongFormDailyGrid(input,sheetName){
     var rows=Array.isArray(input)?input:[];
-    if(rows.length<9)return false;
-    var headerIndex=-1;
-    for(var i=0;i<Math.min(rows.length,12);i++){
-      var values=rowValues(rows[i]).map(function(value){return text(value).replace(/\s/g,'');});
-      if(REQUIRED_HEADERS.every(function(header){return values.indexOf(header.replace(/\s/g,''))>=0;})){headerIndex=i;break;}
-    }
+    if(rows.length<2)return false;
+    var headerIndex=longFormHeaderIndex(rows);
     if(headerIndex<0)return false;
-    var map=headerMap(rows[headerIndex]),sample=rows.slice(headerIndex+1,headerIndex+13),recognizedTypes=0,richRows=0;
+    var map=headerMap(rows[headerIndex]),sample=rows.slice(headerIndex+1,headerIndex+25).filter(function(row){return text(valueAt(row,map,'顺序日'))||text(valueAt(row,map,'主题'))||text(valueAt(row,map,'今日内容（整格照做）'));}),recognizedTypes=0,richRows=0;
     sample.forEach(function(row){
       if(WORKOUT_TYPE_MAP[text(valueAt(row,map,'类型'))])recognizedTypes++;
       var content=text(valueAt(row,map,'今日内容（整格照做）'));
       if(/【周期位置】/.test(content)&&/【本轮渐进】/.test(content)&&(/【主训练】|【完全休息】|【技术主课】|【整合\/自由爬】/.test(content)))richRows++;
     });
-    return recognizedTypes>=Math.min(6,sample.length)&&richRows>=Math.min(4,sample.length);
+    return sample.length>0&&recognizedTypes>0&&richRows>0;
   }
 
   function parseSetSequence(value,count){
@@ -356,7 +359,7 @@
   function parseLongFormDailyGrid(rows,options){
     options=options||{};
     if(!detectLongFormDailyGrid(rows,options.sheetName))throw new Error('不是受支持的 Long-form Daily Grid。');
-    var headerIndex=rows.findIndex(function(row){var values=rowValues(row).map(function(value){return text(value).replace(/\s/g,'');});return REQUIRED_HEADERS.every(function(header){return values.indexOf(header.replace(/\s/g,''))>=0;});});
+    var headerIndex=longFormHeaderIndex(rows);
     var map=headerMap(rows[headerIndex]),pool={},unrecognized=[],plan=[];
     rows.slice(headerIndex+1).forEach(function(row){if(!text(valueAt(row,map,'顺序日'))&&!text(valueAt(row,map,'主题'))&&!text(valueAt(row,map,'今日内容（整格照做）')))return;plan.push(parseWorkoutRow(row,map,plan.length,pool,unrecognized));});
     var validation=validateLongFormProgram(plan,{sharedSourceBlocks:pool,unrecognized:unrecognized}),stats=validation.stats,warnings=validation.warnings;
@@ -369,6 +372,7 @@
   }
 
   global.detectLongFormDailyGrid=detectLongFormDailyGrid;
+  global.longFormHeaderIndex=longFormHeaderIndex;
   global.parseLongFormDailyGrid=parseLongFormDailyGrid;
   global.parseSetSequence=parseSetSequence;
   global.parseLongFormMeasure=parseMeasure;
