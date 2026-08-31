@@ -483,7 +483,8 @@ function restoreCurrentWorkoutDraft(){
   }
   if(draft.note!==undefined) setCurrentSessionNote(draft.note,{noSave:true});
   (draft.warmups||[]).forEach(function(saved,idx){
-    var card=document.querySelectorAll('#warmupExercises .warmCard')[idx]; if(!card) return;
+    var cards=Array.prototype.slice.call(document.querySelectorAll('#warmupExercises .warmCard'));
+    var card=(saved.exerciseId&&cards.find(function(item){return (item.getAttribute('data-card-id')||item.id||'')===saved.exerciseId;}))||cards[idx]; if(!card) return;
     var name=card.querySelector('[data-field="warmName"]'); if(name&&saved.name) name.value=saved.name;
     var wrap=card.querySelector('.warmSets');
     var rows=Array.prototype.slice.call(card.querySelectorAll('.warmSets .setrow'));
@@ -693,22 +694,44 @@ function parseWarmupItems(text){
 }
 function warmupRestControlHTML(id,sec){return restControlHTML(id,{min:15,max:120,def:sec||30,label:'热身'});}
 function durationControlHTML(id,sec){let v=sec||'';return `<div class="actionCell" id="act_${id}"><div class="actionInner"><input data-field="duration" placeholder="动作倒计时/秒，可空" type="number" step="1" value="${v}"><button class="actionBtn" onclick="startDurationTimer('${id}')">开始动作倒计时</button></div><div class="actionTimer" id="dt_${id}">${v?fmt(parseInt(v)): '--:--'}</div></div>`;}
-function warmupSetHTML(ei,s,reps,rest,duration,setId){
+function warmupSetHTML(ei,s,reps,rest,duration,setId,options){
+  options=options||{};
   let id=setId||createSetId('w'+ei);
   rest=Number(rest||30)||30;
-  return `<div class="setrow warmSet" id="row_${id}" data-set-id="${id}" data-set-no="${s}" data-warm-row="1" data-warm="${ei}" data-set="${s}">
-    <label>第${s}组</label>
+  return `<div class="setrow warmSet${options.compact?' warmupStageSet':''}" id="row_${id}" data-set-id="${id}" data-set-no="${s}" data-warm-row="1" data-warm="${ei}" data-set="${s}">
+    <label>${options.compact?'本阶段记录':('第'+s+'组')}</label>
     <div class="liftLine">
-      <input data-field="weight" placeholder="重量" type="number" step="0.5">
-      <select class="unitSelect" data-field="unit"><option value="kg" selected>kg</option><option value="lb">lb</option></select>
+      <input data-field="weight" placeholder="重量" type="number" step="0.5" value="${escapeHtml(options.weight||'')}">
+      <select class="unitSelect" data-field="unit"><option value="kg"${String(options.unit||'kg').toLowerCase()==='kg'?' selected':''}>kg</option><option value="lb"${String(options.unit||'').toLowerCase()==='lb'?' selected':''}>lb</option></select>
       <span class="op">×</span>
       <input data-field="reps" placeholder="次数" type="number" step="1" value="${String(reps||'').split(/[–\-~至]/).pop()||''}">
       <span class="op">-</span>
-      <input data-field="rir" placeholder="余力">
+      <input data-field="rir" placeholder="余力" value="${escapeHtml(options.rir||'')}">
     </div>
     ${durationControlHTML(id,duration)}
-    <div class="row" style="gap:6px">${warmupRestControlHTML(id,rest)}<button class="delBtn" onclick="removeWarmupSet(this)">删除这一组</button></div>
+    <div class="row" style="gap:6px">${warmupRestControlHTML(id,rest)}${options.compact?'':'<button class="delBtn" onclick="removeWarmupSet(this)">删除这一组</button>'}</div>
   </div>`;
+}
+function structuredWarmupStageCardHTML(stage,groupIndex,stageIndex){
+  var viewExerciseId=stage.viewExerciseId||safeDomId('warmupStage',groupIndex,stage.name||stage.instruction);
+  var domId=safeDomId('warmupStageCard',stageIndex,viewExerciseId);
+  var instruction=stage.instruction||stage.line||stage.name||('阶段 '+(stageIndex+1));
+  var cue=stage.techniqueCue?'<div class="warmupStageCue">'+escapeHtml(stage.techniqueCue)+'</div>':'';
+  var setHTML=warmupSetHTML(groupIndex+'_'+stageIndex,1,stage.reps,stage.rest,stage.duration,stage.viewSetId,{compact:true,weight:stage.weight,unit:stage.unit,rir:stage.rir});
+  return `<article id="${domId}" class="exercise warmCard warmupStageCard" data-warm-card="${groupIndex}_${stageIndex}" data-card-id="${escapeHtml(viewExerciseId)}" data-source-activity-id="${escapeHtml(stage.activityId||'')}" data-source-segment-no="${escapeHtml(stage.sourceSegmentNo||stageIndex+1)}">
+    <input type="hidden" data-field="warmName" value="${escapeHtml(stage.name||('阶段 '+(stageIndex+1)))}">
+    <div class="warmupStageHead"><b>${escapeHtml(stage.name||('阶段 '+(stageIndex+1)))}</b><span>${escapeHtml(instruction)}</span></div>
+    ${cue}<div class="warmSets">${setHTML}</div>
+  </article>`;
+}
+function structuredWarmupGroupHTML(group,groupIndex){
+  var meta=[group.warmupType==='ramp'?'递增热身':'热身',group.duration,group.items.length+'个阶段'].filter(Boolean).join('｜');
+  var cue=group.overallCue?'<div class="warmupGroupCue">'+escapeHtml(group.overallCue)+'</div>':'';
+  var stages=(group.items||[]).map(function(stage,stageIndex){return structuredWarmupStageCardHTML(stage,groupIndex,stageIndex);}).join('');
+  return `<details class="warmupDisplayGroup" data-display-name="${escapeHtml(group.title||'热身准备')}" data-warmup-group-key="${escapeHtml(group.groupKey||'')}" open>
+    <summary><span><b>${escapeHtml(group.title||'热身准备')}</b><small>${escapeHtml(meta)}</small></span><span class="warmupGroupToggle">展开 / 收起</span></summary>
+    <div class="warmupGroupBody">${cue}${stages}</div>
+  </details>`;
 }
 function warmupCardHTML(ex,ei){
   var exists=!!findWarmupActionTemplateByName(ex.name);
@@ -729,10 +752,14 @@ function warmupCardHTML(ex,ei){
   return html;
 }
 function escapeHtml(x){return String(x??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
-function parseAndRenderWarmups(showAlert,structuredItems){
+function parseAndRenderWarmups(showAlert,structuredItems,structuredGroups){
   let box=document.getElementById('warmupInput'); if(!box) return [];
   let items=Array.isArray(structuredItems)?structuredItems:parseWarmupItems(box.value); let html='';
-  items.forEach((ex,ei)=>{html+=warmupCardHTML(ex,ei);});
+  if(Array.isArray(structuredGroups)&&structuredGroups.length){
+    structuredGroups.forEach(function(group,groupIndex){html+=structuredWarmupGroupHTML(group,groupIndex);});
+  }else{
+    items.forEach((ex,ei)=>{html+=warmupCardHTML(ex,ei);});
+  }
   document.getElementById('warmupExercises').innerHTML=html || '<pre>暂无热身项目。可以点“手动添加项目”。</pre>';
   bindTrainingDataInputs(document);
   renderModuleMap();
@@ -954,10 +981,11 @@ function dropModule(ev){
 }
 
 function allVisibleModuleCards(){
-  return Array.prototype.slice.call(document.querySelectorAll('#warmupExercises .exercise, #exercises .exercise'));
+  return Array.prototype.slice.call(document.querySelectorAll('#warmupExercises > .warmupDisplayGroup, #warmupExercises > .exercise, #exercises .exercise'));
 }
 function moduleDisplayName(card){
   if(!card) return '训练模块';
+  if(card.getAttribute&&card.getAttribute('data-display-name'))return card.getAttribute('data-display-name');
   var inp=card.querySelector('[data-field="warmName"], [data-field="mainName"]');
   if(inp && inp.value) return inp.value;
   var h=card.querySelector('h3');
@@ -970,14 +998,16 @@ function applyModuleColors(){
     c.classList.add('moduleColor'+(i%8));
   });
 }
+function moduleCardsForSection(section){
+  var sel=section==='warm'?'#warmupExercises > .warmupDisplayGroup, #warmupExercises > .exercise':'#exercises .exercise';
+  return Array.prototype.slice.call(document.querySelectorAll(sel));
+}
 function scrollToModule(section,idx){
-  var sel=section==='warm'?'#warmupExercises .exercise':'#exercises .exercise';
-  var card=document.querySelectorAll(sel)[idx];
+  var card=moduleCardsForSection(section)[idx];
   if(card){card.scrollIntoView({behavior:'smooth',block:'center'});card.classList.add('ghostDrop');setTimeout(function(){card.classList.remove('ghostDrop');},900);}
 }
 function moveModuleByMap(section,idx,dir){
-  var sel=section==='warm'?'#warmupExercises .exercise':'#exercises .exercise';
-  var cards=document.querySelectorAll(sel); var card=cards[idx]; if(!card) return;
+  var cards=moduleCardsForSection(section); var card=cards[idx]; if(!card||card.classList.contains('warmupDisplayGroup')) return;
   var parent=card.parentNode;
   if(dir<0 && card.previousElementSibling){ parent.insertBefore(card,card.previousElementSibling); }
   if(dir>0 && card.nextElementSibling){ parent.insertBefore(card.nextElementSibling,card); }
@@ -988,22 +1018,22 @@ function chipDragStart(ev,section,idx){draggedChip={section:section,idx:idx};try
 function chipDragOver(ev){ev.preventDefault();}
 function chipDrop(ev,section,idx){
   ev.preventDefault(); if(!draggedChip||draggedChip.section!==section) return;
-  var sel=section==='warm'?'#warmupExercises .exercise':'#exercises .exercise';
-  var cards=document.querySelectorAll(sel); var from=cards[draggedChip.idx], to=cards[idx]; if(!from||!to||from===to) return;
+  var cards=moduleCardsForSection(section); var from=cards[draggedChip.idx], to=cards[idx]; if(!from||!to||from===to||from.classList.contains('warmupDisplayGroup')) return;
   var parent=to.parentNode; parent.insertBefore(from, draggedChip.idx<idx ? to.nextSibling : to); draggedChip=null; renderModuleMap();
 }
 function renderModuleMap(){
   var box=document.getElementById('moduleMap'); if(!box) return;
   applyModuleColors();
   function list(section){
-    var sel=section==='warm'?'#warmupExercises .exercise':'#exercises .exercise';
+    var sel=section==='warm'?'#warmupExercises > .warmupDisplayGroup, #warmupExercises > .exercise':'#exercises .exercise';
     var label=section==='warm'?'热身':'正式';
     var cards=Array.prototype.slice.call(document.querySelectorAll(sel));
     if(!cards.length) return '';
     var chips=cards.map(function(c,i){
       var name=escapeHtml(moduleDisplayName(c));
       var cls='moduleChip '+section+' moduleColor'+(allVisibleModuleCards().indexOf(c)%8);
-      return '<div class="'+cls+'" draggable="true" ondragstart="chipDragStart(event,\''+section+'\','+i+')" ondragover="chipDragOver(event)" ondrop="chipDrop(event,\''+section+'\','+i+')" onclick="scrollToModule(\''+section+'\','+i+')"><b>'+label+' '+(i+1)+'</b><span>'+name+'</span><div class="chipTools" onclick="event.stopPropagation()"><button onclick="moveModuleByMap(\''+section+'\','+i+',-1)">←</button><button onclick="moveModuleByMap(\''+section+'\','+i+',1)">→</button></div></div>';
+      var fixed=c.classList&&c.classList.contains('warmupDisplayGroup');
+      return '<div class="'+cls+'" '+(fixed?'':'draggable="true" ondragstart="chipDragStart(event,\''+section+'\','+i+')" ondragover="chipDragOver(event)" ondrop="chipDrop(event,\''+section+'\','+i+')"')+' onclick="scrollToModule(\''+section+'\','+i+')"><b>'+label+' '+(i+1)+'</b><span>'+name+'</span>'+(fixed?'':'<div class="chipTools" onclick="event.stopPropagation()"><button onclick="moveModuleByMap(\''+section+'\','+i+',-1)">←</button><button onclick="moveModuleByMap(\''+section+'\','+i+',1)">→</button></div>')+'</div>';
     }).join('');
     return '<div class="moduleMapList">'+chips+'</div>';
   }
@@ -1805,7 +1835,7 @@ function rebuild(){
   document.getElementById('warmupInput').value = warmupResolution.text;
   document.getElementById('warmupBox').textContent = warmupResolution.text || '本日未设置热身';
   var warmupItems=warmupResolution.kind==='structured'?warmupResolution.items:((warmupResolution.kind==='rest'||warmupResolution.kind==='none')?[]:null);
-  parseAndRenderWarmups(false,warmupItems);
+  parseAndRenderWarmups(false,warmupItems,warmupResolution.kind==='structured'?warmupResolution.groups:[]);
   renderNoteInputs();
   renderCompleteDebugStatus();
   var html='';
