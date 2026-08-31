@@ -4,8 +4,8 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>逐日训练器｜12周计划</title>
-<script>window.APP_BUILD_VERSION='20260831-warmup-grouping-1';</script>
-<link rel="stylesheet" href="style.css?v=20260831-warmup-grouping-1"/>
+<script>window.APP_BUILD_VERSION='20260831-timer-controls-1';</script>
+<link rel="stylesheet" href="style.css?v=20260831-timer-controls-1"/>
 </head>
 <body>
 <header class="appHeader">
@@ -121,12 +121,13 @@
     <div class="card workoutUtilityCard">
       <h3>组间歇计时器</h3>
       <div class="timer" id="timer">03:00</div>
-      <div class="row timerControls">
-        <button onclick="setTimer(45)">45秒</button><button onclick="setTimer(90)">90秒</button><button onclick="setTimer(120)">2分</button><button onclick="setTimer(180)">3分</button><button onclick="setTimer(300)">5分</button>
+      <div class="row timerControls" data-general-timer-controls>
+        <button type="button" data-timer-seconds="45">45秒</button><button type="button" data-timer-seconds="90">90秒</button><button type="button" data-timer-seconds="120">2分</button><button type="button" data-timer-seconds="180" aria-pressed="true">3分</button><button type="button" data-timer-seconds="300">5分</button>
       </div>
-      <div class="row timerControls" style="margin-top:8px">
-        <button class="primary" onclick="startTimer()">开始</button><button onclick="pauseTimer()">暂停</button><button onclick="resetTimer()">重置</button><button onclick="notifyPermission()">开启提醒</button>
+      <div class="row timerControls" data-general-timer-controls style="margin-top:8px">
+        <button type="button" class="primary" data-timer-action="start">开始</button><button type="button" data-timer-action="pause">暂停</button><button type="button" data-timer-action="reset">重置</button><button type="button" data-timer-action="notify">开启提醒</button>
       </div>
+      <div id="timerControlStatus" class="small timerControlStatus" aria-live="polite">已选择 03:00</div>
       <hr style="border-color:var(--line);border-width:0 0 1px;margin:14px 0">
       <h3>上次表现 / RM 参考</h3>
       <div id="lastBox" class="small"></div>
@@ -402,21 +403,21 @@
   </div>
 </div>
 <div id="timerConfirmMask" class="timerConfirmMask"><div class="timerConfirmBox"><h3 id="timerConfirmTitle">倒计时结束</h3><p id="timerConfirmBody">可以开始下一步。</p><button type="button" onclick="closeTimerConfirm()">确认</button></div></div>
-<script src="prescription.js?v=20260831-warmup-grouping-1"></script>
-<script src="date-integrity.js?v=20260831-warmup-grouping-1"></script>
-<script src="execution-reconciler.js?v=20260831-warmup-grouping-1"></script>
-<script src="storage.js?v=20260831-warmup-grouping-1"></script>
-<script src="templates.js?v=20260831-warmup-grouping-1"></script>
-<script src="parser.js?v=20260831-warmup-grouping-1"></script>
-<script src="workout-view.js?v=20260831-warmup-grouping-1"></script>
-<script src="history.js?v=20260831-warmup-grouping-1"></script>
-<script src="section-parser.js?v=20260831-warmup-grouping-1"></script>
-<script src="long-form-daily-adapter.js?v=20260831-warmup-grouping-1"></script>
-<script src="import-validator.js?v=20260831-warmup-grouping-1"></script>
-<script src="plan-compiler.js?v=20260831-warmup-grouping-1"></script>
-<script src="importer.js?v=20260831-warmup-grouping-1"></script>
-<script src="program-store.js?v=20260831-warmup-grouping-1"></script>
-<script src="app.js?v=20260831-warmup-grouping-1"></script>
+<script src="prescription.js?v=20260831-timer-controls-1"></script>
+<script src="date-integrity.js?v=20260831-timer-controls-1"></script>
+<script src="execution-reconciler.js?v=20260831-timer-controls-1"></script>
+<script src="storage.js?v=20260831-timer-controls-1"></script>
+<script src="templates.js?v=20260831-timer-controls-1"></script>
+<script src="parser.js?v=20260831-timer-controls-1"></script>
+<script src="workout-view.js?v=20260831-timer-controls-1"></script>
+<script src="history.js?v=20260831-timer-controls-1"></script>
+<script src="section-parser.js?v=20260831-timer-controls-1"></script>
+<script src="long-form-daily-adapter.js?v=20260831-timer-controls-1"></script>
+<script src="import-validator.js?v=20260831-timer-controls-1"></script>
+<script src="plan-compiler.js?v=20260831-timer-controls-1"></script>
+<script src="importer.js?v=20260831-timer-controls-1"></script>
+<script src="program-store.js?v=20260831-timer-controls-1"></script>
+<script src="app.js?v=20260831-timer-controls-1"></script>
 <script>document.getElementById('appBuildVersion').textContent=window.APP_BUILD_VERSION||'unknown';</script>
 </body>
 </html>

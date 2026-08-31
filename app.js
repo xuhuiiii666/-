@@ -2083,12 +2083,16 @@ function initFloatingNoteDrag(){
     dragging=false; box.classList.remove('dragging'); clampFloatingNote();
     if(moved && e && e.cancelable) e.preventDefault();
   }
+  function cancelDrag(){
+    dragging=false; moved=false; box.classList.remove('dragging');
+  }
   head.addEventListener('mousedown',down);
   window.addEventListener('mousemove',move,{passive:false});
   window.addEventListener('mouseup',up,{passive:false});
   head.addEventListener('touchstart',down,{passive:true});
   window.addEventListener('touchmove',move,{passive:false});
   window.addEventListener('touchend',up,{passive:false});
+  window.addEventListener('touchcancel',cancelDrag,{passive:true});
   window.addEventListener('resize',function(){setTimeout(clampFloatingNote,80);});
 }
 
@@ -2122,8 +2126,19 @@ function skipWorkout(){ setCurrentSessionNote('',{noSave:true}); saveState(); al
 function prevWorkout(){state.currentIndex=Math.max(0,state.currentIndex-1);saveState();rebuild();}
 function nextWorkout(){state.currentIndex=Math.min(PLAN.length-1,state.currentIndex+1);saveState();rebuild();}
 function doneSet(id,rest){startRowTimer(id,rest);}
-function setTimer(sec){timerBase=sec;timerLeft=sec;renderTimer();}
-function renderTimer(){document.getElementById('timer').textContent=fmt(timerLeft);}
+function setTimerControlStatus(message){
+  var status=document.getElementById('timerControlStatus');
+  if(status) status.textContent=message||'';
+}
+function renderTimerSelection(){
+  document.querySelectorAll('[data-timer-seconds]').forEach(function(button){
+    button.setAttribute('aria-pressed',Number(button.getAttribute('data-timer-seconds'))===Number(timerBase)?'true':'false');
+  });
+}
+function setTimer(sec){
+  sec=Math.max(0,Number(sec)||0); timerBase=sec;timerLeft=sec;renderTimer();renderTimerSelection();setTimerControlStatus('已选择 '+fmt(timerBase));
+}
+function renderTimer(){var timer=document.getElementById('timer');if(timer)timer.textContent=fmt(timerLeft);}
 function tickRealTimer(){
   if(!activeTimerContext) return;
   var remain=Math.ceil((activeTimerContext.endAt-Date.now())/1000);
@@ -2147,9 +2162,9 @@ function tickRealTimer(){
     }else{ beep(); }
   }
 }
-function startTimer(){clearInterval(timerId); activeTimerContext={type:'general',id:'general',endAt:Date.now()+timerLeft*1000}; timerId=setInterval(tickRealTimer,1000); tickRealTimer();}
-function pauseTimer(){clearInterval(timerId); if(activeTimerContext){timerLeft=Math.max(0,Math.ceil((activeTimerContext.endAt-Date.now())/1000)); activeTimerContext=null;} if(activeSet && rowTimers[activeSet]) rowTimers[activeSet].running=false; renderTimer();}
-function resetTimer(){clearInterval(timerId); activeTimerContext=null; timerLeft=timerBase;renderTimer(); if(activeSet){let mt=document.getElementById('mt_'+activeSet); if(mt)mt.textContent=fmt(timerBase);}}
+function startTimer(){clearInterval(timerId); if(timerLeft<=0)timerLeft=timerBase; activeTimerContext={type:'general',id:'general',endAt:Date.now()+timerLeft*1000}; timerId=setInterval(tickRealTimer,1000); tickRealTimer();setTimerControlStatus('计时中 · '+fmt(timerLeft));}
+function pauseTimer(){clearInterval(timerId); if(activeTimerContext){timerLeft=Math.max(0,Math.ceil((activeTimerContext.endAt-Date.now())/1000)); activeTimerContext=null;} if(activeSet && rowTimers[activeSet]) rowTimers[activeSet].running=false; renderTimer();setTimerControlStatus('已暂停 · '+fmt(timerLeft));}
+function resetTimer(){clearInterval(timerId); activeTimerContext=null; timerLeft=timerBase;renderTimer();setTimerControlStatus('已重置 · '+fmt(timerBase)); if(activeSet){let mt=document.getElementById('mt_'+activeSet); if(mt)mt.textContent=fmt(timerBase);}}
 window.addEventListener('focus', tickRealTimer); document.addEventListener('visibilitychange', function(){ if(!document.hidden) tickRealTimer(); });
 function startDurationTimer(id){
   let actBox0=document.getElementById('act_'+id); let inp=actBox0?actBox0.querySelector('[data-field="duration"]'):null;
@@ -2352,7 +2367,63 @@ function startRowTimer(id,forcedRest){
   tickRealTimer();
 }
 function beep(){ notifyTimerDone('组间休息结束','可以开始下一组了。'); }
-function notifyPermission(){ if('Notification' in window) Notification.requestPermission().then(()=>alert('提醒权限已处理')); else alert('当前浏览器不支持通知。');}
+function notifyPermission(){
+  if(!('Notification' in window)){
+    setTimerControlStatus('当前浏览器不支持系统提醒');
+    alert('当前浏览器不支持通知。');
+    return;
+  }
+  var settled=false;
+  function finish(permission){
+    if(settled)return; settled=true;
+    if(permission==='granted'){
+      setTimerControlStatus('提醒已开启'); alert('提醒已开启。');
+    }else if(permission==='denied'){
+      setTimerControlStatus('提醒权限未开启'); alert('提醒权限未开启，请在浏览器网站设置中允许通知。');
+    }else{
+      setTimerControlStatus('尚未开启提醒权限'); alert('尚未开启提醒权限。');
+    }
+  }
+  try{
+    var request=Notification.requestPermission(finish);
+    if(request&&typeof request.then==='function') request.then(finish).catch(function(error){
+      if(settled)return;
+      settled=true; console.error('[timer] notification permission failed',error);
+      setTimerControlStatus('提醒开启失败'); alert('提醒开启失败：'+(error&&error.message?error.message:error));
+    });
+    else setTimeout(function(){finish(Notification.permission||'default');},0);
+  }catch(error){
+    settled=true; console.error('[timer] notification permission failed',error);
+    setTimerControlStatus('提醒开启失败'); alert('提醒开启失败：'+(error&&error.message?error.message:error));
+  }
+}
+function bindGeneralTimerControls(){
+  var controls=document.querySelector('.workoutUtilityCard');
+  if(!controls||controls.dataset.timerControlsBound==='1')return;
+  controls.dataset.timerControlsBound='1';
+  var lastTouchAt=0;
+  function findButton(target){return target&&target.closest?target.closest('button[data-timer-seconds],button[data-timer-action]'):null;}
+  function press(button){
+    if(!button||!controls.contains(button))return;
+    button.classList.add('timerPressed'); setTimeout(function(){button.classList.remove('timerPressed');},140);
+    var seconds=button.getAttribute('data-timer-seconds');
+    if(seconds!==null){setTimer(Number(seconds));return;}
+    var action=button.getAttribute('data-timer-action');
+    if(action==='start')startTimer();
+    else if(action==='pause')pauseTimer();
+    else if(action==='reset')resetTimer();
+    else if(action==='notify')notifyPermission();
+  }
+  controls.addEventListener('touchend',function(event){
+    var button=findButton(event.target); if(!button)return;
+    lastTouchAt=Date.now(); if(event.cancelable)event.preventDefault(); press(button);
+  },{passive:false});
+  controls.addEventListener('click',function(event){
+    if(Date.now()-lastTouchAt<700)return;
+    press(findButton(event.target));
+  });
+  renderTimerSelection();
+}
 function calendarThemeInfo(w){
   if(typeof classifyTrainingDay === 'function'){
     var info = classifyTrainingDay(w);
@@ -3057,4 +3128,4 @@ function refreshCalendarAndFocus(delay){
   };
 })();
 
-rebuild();showTab('today');initWarmupPanel();initFloatingNoteDrag();
+rebuild();showTab('today');initWarmupPanel();initFloatingNoteDrag();bindGeneralTimerControls();
