@@ -62,6 +62,7 @@ export function loadImporter(storage=new MemoryStorage()){
   loadScript(context,'parser.js');
   loadScript(context,'section-parser.js');
   loadScript(context,'long-form-daily-adapter.js');
+  loadScript(context,'planner-import-v2.js');
   loadScript(context,'import-validator.js');
   loadScript(context,'plan-compiler.js');
   loadScript(context,'importer.js');
@@ -81,6 +82,7 @@ export function loadTrainingModules(storage=new MemoryStorage()){
   loadScript(context,'history.js');
   loadScript(context,'section-parser.js');
   loadScript(context,'long-form-daily-adapter.js');
+  loadScript(context,'planner-import-v2.js');
   loadScript(context,'import-validator.js');
   loadScript(context,'plan-compiler.js');
   loadScript(context,'importer.js');

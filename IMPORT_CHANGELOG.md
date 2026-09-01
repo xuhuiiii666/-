@@ -2,6 +2,23 @@
 
 本文件记录会影响 Structured Import、Excel 字段、Sheet、trainingRole、Set Prescription、Superset、时间预算或 validation 的接口变化。
 
+## 2026-08-31
+
+新增：
+
+- `Planner Import v2`，完整规范见唯一真源 `planner-protocol/PLANNER_IMPORT_V2_SPEC.md`。
+- 固定 v2 Workbook、稳定来源键、canonical English enum 和严格外键校验。
+- 独立 Activity / Activity Segment、作用域说明块和 multi-stage drop segment。
+- `targetWeight` 作为计划 prescription 保存，与实际 `weight/weightKg`、日志和历史严格隔离。
+- 官方空白母模板、完整语义示例和精简 AI 生成入口。
+
+兼容：
+
+- 路由顺序升级为 Planner Import v2 → Structured v1 → Long-form Daily Grid → Legacy。
+- 一旦识别 v2 标识，校验失败为终止错误，不允许 fallback。
+- Structured v1、Long-form 和 Legacy 的协议与解析规则没有改变。
+- App State 继续使用 Schema v6，ROOT key 继续使用 `training-tracker-state`，不触发用户数据 migration。
+
 ## 2026-08-30
 
 新增：

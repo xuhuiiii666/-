@@ -488,6 +488,7 @@ function detectStructuredFormat(workbook){
   return !!(workbook&&Array.isArray(workbook.SheetNames)&&workbook.SheetNames.indexOf(STRUCTURED_DATA_SHEET)>=0);
 }
 function importAdapterLabel(parsed){
+  if(parsed&&parsed.format==='planner-v2')return 'Planner Import v2';
   if(parsed&&parsed.format==='structured-v1')return 'Structured Import v1';
   if(parsed&&parsed.format==='long-form-daily-v1')return 'Long-form Daily Grid';
   return 'Legacy Import';
@@ -503,6 +504,9 @@ function longFormRouteWarnings(parsed){
 }
 function parseWorkbookToImport(workbook, file){
   try{
+    if(typeof detectPlannerV2Format==='function'&&detectPlannerV2Format(workbook)){
+      var plannerV2=parsePlannerV2Workbook(workbook,file,rowsFromSheet);plannerV2.adapter=importAdapterLabel(plannerV2);return plannerV2;
+    }
     if(detectStructuredFormat(workbook)){
       var structuredReport=validateStructuredWorkbook(workbook,rowsFromSheet);
       var structured=createStandardProgram(structuredReport,file);structured.adapter=importAdapterLabel(structured);return structured;
@@ -570,11 +574,20 @@ function importUtf8Bytes(value){
 function formatImportMegabytes(bytes){return (Math.max(0,Number(bytes)||0)/1000000).toFixed(2)+' MB';}
 function programFromParsedImport(parsed){
   if(!parsed||!parsed.plan||!parsed.plan.length) throw new ImportError('请先成功预览训练计划。','NO_PREVIEW');
-  var importSource=parsed.format==='structured-v1'?'structured-v1':(parsed.format==='long-form-daily-v1'?'long-form-daily-v1':'excel');
+  var importSource=parsed.format==='planner-v2'?'planner-v2':(parsed.format==='structured-v1'?'structured-v1':(parsed.format==='long-form-daily-v1'?'long-form-daily-v1':'excel'));
   var program=typeof createProgramFromPlan==='function'&&typeof normalizeProgram==='function'
     ?createProgramFromPlan(parsed.plan,{name:parsed.programName||parsed.sourceFileName||'导入训练计划',source:importSource,sourceFileName:parsed.sourceFileName||''})
     :{name:parsed.programName||parsed.sourceFileName||'导入训练计划',source:importSource,sourceFileName:parsed.sourceFileName||'',days:parsed.plan.slice()};
   program.warmupDefinitions=(parsed.warmups||[]).slice();
+  if(parsed.format==='planner-v2'){
+    program.importFormat='planner-v2';
+    program.plannerProtocol='planner-import-v2';
+    program.plannerSchemaVersion='2';
+    program.planKey=parsed.planKey||'';
+    program.planVersion=parsed.planVersion||'';
+    program.description=parsed.description||'';
+    program.sourcePlanMetadata={startDate:parsed.startDate||'',locale:parsed.locale||'',note:parsed.note||''};
+  }
   if(parsed.format==='long-form-daily-v1'){
     program.sharedSourceBlocks=Object.assign({},parsed.sharedSourceBlocks||{});
     program.importSemanticStats=Object.assign({},parsed.semanticStats||{});
@@ -604,6 +617,33 @@ function importStorageEstimateLines(parsed){
   return {estimate:estimate,lines:lines};
 }
 function importPrecheckText(parsed,fileName){
+  if(parsed&&parsed.format==='planner-v2'){
+    var plannerReport=parsed.report||{},plannerStats=plannerReport.stats||{},plannerErrors=plannerReport.errors||[],plannerWarnings=plannerReport.warnings||[];
+    var plannerLines=[
+      '文件：'+(fileName||parsed.sourceFileName||''),
+      '导入方式：Planner Import v2',
+      'Build：'+importBuildVersion(),
+      'Protocol：'+(parsed.protocolVersion||plannerReport.protocolVersion||'2.0'),
+      'Schema：'+(plannerReport.schema||parsed.planVersion||'2'),
+      'planKey：'+(parsed.planKey||''),
+      'planVersion：'+(parsed.planVersion||''),
+      'Workout：'+(plannerStats.workouts||0),
+      'Exercise：'+(plannerStats.exercises||0),
+      'Set：'+(plannerStats.sets||0),
+      'Activity：'+(plannerStats.activities||0),
+      'Activity Segment：'+(plannerStats.activitySegments||0),
+      'Superset：'+(plannerStats.supersets||0),
+      'Drop Segment：'+(plannerStats.dropSegments||0),
+      'Instruction：'+(plannerStats.instructions||0),
+      'Errors：'+plannerErrors.length,
+      'Warnings：'+plannerWarnings.length,
+      'Semantic validation：'+(plannerReport.semanticStatus||'FAIL')
+    ];
+    plannerWarnings.forEach(function(item){plannerLines.push('提醒：'+item);});
+    plannerErrors.forEach(function(item){plannerLines.push('错误：'+item);});
+    if(!plannerErrors.length&&plannerReport.semanticValid)plannerLines=plannerLines.concat(importStorageEstimateLines(parsed).lines);
+    return plannerLines.join('\n');
+  }
   if(parsed&&parsed.format==='long-form-daily-v1'){
     var semantic=parsed.semanticStats||{},types=semantic.types||{};
     var lines=[
@@ -641,7 +681,7 @@ function importPrecheckText(parsed,fileName){
 function renderImportPrecheck(parsed,fileName,error){
   var box=document.getElementById('importPrecheck');if(!box) return;
   var report=error&&(error.report||(error.details&&error.details.report));
-  if(error&&report) parsed={report:report,sourceFileName:fileName||''};
+  if(error&&report) parsed={format:report.format==='Planner Import v2'?'planner-v2':'',report:report,planKey:report.planInfo&&report.planInfo.planKey||'',planVersion:report.planInfo&&report.planInfo.planVersion||'',sourceFileName:fileName||''};
   box.textContent=error&&!report?('文件：'+(fileName||'')+'\nBuild：'+importBuildVersion()+'\n识别失败：'+(error.message||error)+'\n严重错误：1'):importPrecheckText(parsed,fileName);
   var previewProgram=null,exactDuplicate=null,similarSource=null;
   if(!error&&parsed){
@@ -652,7 +692,7 @@ function renderImportPrecheck(parsed,fileName,error){
   if(exactDuplicate)box.textContent+='\n提醒：当前已存在内容完全一致的计划：'+(exactDuplicate.name||exactDuplicate.sourceFileName||'未命名计划')+'。不会自动覆盖或重复创建。';
   else if(similarSource)box.textContent+='\n提醒：当前已存在同名且 Workout 数量相同的计划，但内容不一定相同。确认后仍可导入为新的 Program，不会自动覆盖。';
   var storageEstimate=null;
-  if(!error&&parsed&&parsed.format==='long-form-daily-v1'){
+  if(!error&&parsed&&(parsed.format==='long-form-daily-v1'||parsed.format==='planner-v2')){
     try{storageEstimate=estimateImportStorage(parsed);}catch(ignore){}
   }
   box.classList.toggle('blocked',!!error||!!(report&&report.errors&&report.errors.length)||!!(parsed&&parsed.routeWarnings&&parsed.routeWarnings.length));

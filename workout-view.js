@@ -66,6 +66,10 @@
     if(/通用|功能|准备/.test(activityTitle)&&!/主项/.test(activityTitle))return '通用准备';
     return activityTitle;
   }
+  function mainWarmupAnchorFromTitle(value){
+    var title=text(value),match=title.match(/^(.+?)(?:[｜|]\s*)?主项热身$/);
+    return match?text(match[1]):'';
+  }
   function groupWarmupItemsForDisplay(workout){
     var groups=[];
     structuredWarmupActivities(workout).forEach(function(activity,activityIndex){
@@ -74,13 +78,14 @@
       var workoutType=normalizeType(workout&&workout.workoutType||workout&&workout['类型']);
       var isClimbing=/攀岩/.test(activityTitle)||/攀岩/.test(workoutType);
       var isMainWarmup=/主项热身/.test(activityTitle);
+      var activityAnchor=isMainWarmup?mainWarmupAnchorFromTitle(activityTitle):'';
       var duration=minuteLabel(activity),segments=asArray(activity.segments);
       if(!segments.length&&text(activity.instruction))segments=[{segmentNo:1,label:'',instruction:activity.instruction}];
       var current=null;
       segments.forEach(function(segment,index){
-        var explicitLabel=text(segment&&segment.label),anchorLift='';
-        if(isMainWarmup&&explicitLabel)anchorLift=explicitLabel;
-        if(!current||anchorLift){
+        var explicitLabel=text(segment&&segment.label),anchorLift=activityAnchor;
+        if(isMainWarmup&&!anchorLift&&explicitLabel)anchorLift=explicitLabel;
+        if(!current||(!activityAnchor&&anchorLift)){
           var groupNo=groups.filter(function(group){return group.activityId===activityId;}).length+1;
           current={
             groupKey:'warmup-group-'+stableViewId(activityId)+'-'+groupNo,

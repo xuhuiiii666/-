@@ -145,7 +145,13 @@ test('GT14. floating note touchcancel clears stale dragging before later timer t
   assert.match(appSource,/function cancelDrag\(\)\{\s*dragging=false; moved=false;/);assert.match(appSource,/addEventListener\('touchcancel',cancelDrag/);
 });
 
-test('GT15. hotfix build excludes Planner v2 production resources',()=>{
+test('GT15. Planner v2 release preserves timer controls while loading Planner resources',()=>{
   const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
-  assert.doesNotMatch(html,/planner-import-v2\.js/);assert.doesNotMatch(html,/PLANNER_IMPORT_V2/);
+  assert.match(html,/planner-import-v2\.js\?v=20260901-planner-v2-1/);
+  assert.match(html,/data-timer-seconds="45"/);
+  assert.match(html,/data-timer-seconds="300"/);
+  assert.match(html,/data-timer-action="start"/);
+  assert.match(html,/data-timer-action="pause"/);
+  assert.match(html,/data-timer-action="reset"/);
+  assert.match(html,/data-timer-action="notify"/);
 });

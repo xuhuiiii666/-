@@ -2,6 +2,8 @@
 
 本文档是 Excel 与 training-tracker importer 之间的机器接口规范。它不负责训练内容设计。
 
+> 本文只定义仍受支持的 **Structured Import v1**。新的 AI/人工计划生成应优先使用 `planner-protocol/PLANNER_IMPORT_V2_SPEC.md`；v2 的字段真相只在该文件维护。
+
 - 训练规划 AI 的内容交接要求见 `TRAINING_PLAN_HANDOFF.md`。
 - 接口变化记录见 `IMPORT_CHANGELOG.md`。
 - 内容到 workbook data 的转换由 `plan-compiler.js` 完成。
@@ -24,10 +26,13 @@ Legacy Import 继续兼容徐晖旧版、肖悦旧版、`手机查看版_一日�
 Long-form Daily Grid 是独立适配路径，分流顺序为：
 
 ```text
-Structured Import v1
+Planner Import v2
+→ Structured Import v1
 → Long-form Daily Grid Adapter
 → Legacy Import
 ```
+
+存在任意 Planner v2 机器 Sheet 时必须先进入 v2 Validator；失败后不得回退本协议。
 
 Long-form 检测必须使用严格表头与内容特征，不能抢占已有 Legacy 文件。
 

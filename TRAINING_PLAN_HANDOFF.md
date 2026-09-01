@@ -2,6 +2,8 @@
 
 本文档定义“训练规划 AI → Codex”之间的训练内容协议。它不定义 Excel 列名，也不负责训练器内部数据结构。
 
+> 本文保留给旧 Structured v1 编译流程。今后需要由任意 AI 直接生成训练器可导入 Workbook 时，必须使用唯一真源 `planner-protocol/PLANNER_IMPORT_V2_SPEC.md` 和官方 v2 母模板，不要从本文推断 v2 列名或 enum。
+
 - `TRAINING_PLAN_HANDOFF.md`：训练规划 AI 应提供什么内容。
 - `IMPORT_FORMAT_V1.md`：Codex 生成的 Excel 与 importer 之间的机器接口。
 - `plan-compiler.js`：把已经确定的训练内容转换为当前 Structured Import 数据。
