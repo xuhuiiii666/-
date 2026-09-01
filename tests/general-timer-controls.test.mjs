@@ -147,7 +147,7 @@ test('GT14. floating note touchcancel clears stale dragging before later timer t
 
 test('GT15. Planner v2 release preserves timer controls while loading Planner resources',()=>{
   const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
-  assert.match(html,/planner-import-v2\.js\?v=20260901-planner-v2-1/);
+  assert.match(html,/planner-import-v2\.js\?v=20260901-main-render-hotfix-1/);
   assert.match(html,/data-timer-seconds="45"/);
   assert.match(html,/data-timer-seconds="300"/);
   assert.match(html,/data-timer-action="start"/);

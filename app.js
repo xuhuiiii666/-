@@ -1266,17 +1266,29 @@ function restRangeForSetPlan(base,setPlan,label){
   if(!isFinite(def)||def<=0)def=min;
   return {min:min,max:max,def:def,label:label||base.label||'动作'};
 }
+function safeMainCardHelper(label,fallback,callback,exercise,workout){
+  try{return callback();}
+  catch(error){
+    console.error('[main-render] '+label+' failed',{
+      workoutId:workout&&workout.workoutId||'',
+      workoutTitle:workout&&(workout.title||workout['训练主题'])||'',
+      exerciseId:exercise&&exercise.exerciseId||'',
+      exerciseName:exercise&&exercise.name||''
+    },error);
+    return fallback;
+  }
+}
 function mainCardHTML(ex,ei,w,custom){
   custom=!!(custom||ex.custom);
-  var suggested=custom?'':suggestWeight(ex.name, ex.reps);
+  var suggested=custom?'':safeMainCardHelper('suggestWeight','',function(){return suggestWeight(ex.name,ex.reps);},ex,w);
   var rr=custom?{min:60,max:240,def:120,label:'自定'}:restRangeFor(ex,w);
-  var compound=compoundSpecForExercise(ex);
+  var compound=safeMainCardHelper('compoundSpec',null,function(){return compoundSpecForExercise(ex);},ex,w);
   var hasMultiStage=Array.isArray(ex.setsData)&&ex.setsData.some(function(set){return Array.isArray(set&&set.segments)&&set.segments.length;});
   var setCount=parseInt(ex.sets,10)||1;
   var repTxt=String(ex.reps||'');
   var rirTxt=String(ex.rir||'');
   var originalName=ex.originalName||ex.name||'自定义训练模块';
-  var exists=!!findExerciseTemplateByName(ex.trackName||ex.name||originalName);
+  var exists=!!safeMainCardHelper('templateLookup',null,function(){return findExerciseTemplateByName(ex.trackName||ex.name||originalName);},ex,w);
   var saveCls=exists?' hidden':'';
   var statusCls=exists?'':' hidden';
   var cardId=ex.exerciseId||safeDomId('mainCard',ei,ex.trackName||ex.name||originalName);
@@ -1288,7 +1300,7 @@ function mainCardHTML(ex,ei,w,custom){
     <div class="row between moduleHead">
       <div class="row">${nameInput}</div>
       <div class="moduleTools"><button onclick="moveModule(this,-1)">上移</button><button onclick="moveModule(this,1)">下移</button><button class="blue" onclick="openExerciseTemplateSwitcher(this)">切换动作</button><button class="blue${saveCls}" data-template-save-main="1" onclick="saveMainCardAsTemplate(this)">保存此动作</button><span class="pill${statusCls}" data-template-status-main="1">已在动作库</span>${custom?'<button class="bad" onclick="removeMainProject(this)">删除</button>':''}<span class="pill">${escapeHtml(ex.line||'手动项目')}</span></div>
-    </div>${planSummary}${ex.techniqueCue?'<div class="exerciseTechniqueCue"><b>技术：</b>'+escapeHtml(ex.techniqueCue)+'</div>':''}${compound?'<div class="compoundCue">'+escapeHtml(compound.cue)+'</div>':''}${lastReferenceHTML(ex.trackName||ex.name||originalName)}`;
+    </div>${planSummary}${ex.techniqueCue?'<div class="exerciseTechniqueCue"><b>技术：</b>'+escapeHtml(ex.techniqueCue)+'</div>':''}${compound?'<div class="compoundCue">'+escapeHtml(compound.cue)+'</div>':''}${safeMainCardHelper('lastReference','<div class="lastRef"><b>上次同名：</b>历史参考暂不可用</div>',function(){return typeof lastReferenceHTML==='function'?lastReferenceHTML(ex.trackName||ex.name||originalName):'<div class="lastRef"><b>上次同名：</b>历史参考暂不可用</div>';},ex,w)}`;
   if(suggested) html+=`<div class="small">参考：按历史最高 e1RM 换算，本次目标 ${escapeHtml(ex.reps)} 次约 ${suggested}kg。上次记录见右侧。</div>`;
   html+='<div class="moduleBody"><div class="mainSets">';
   for(var s=1;s<=setCount;s++){
@@ -1299,6 +1311,39 @@ function mainCardHTML(ex,ei,w,custom){
   }
   html+='</div><div class="row warmTools"><button class="addSetBtn blue" onclick="addMainSet(this)">'+(compound?'添加下一轮':'添加下一组')+'</button><button class="addSetBtn" onclick="duplicateMainSet(this)">'+(compound?'复制上一轮':'复制上一组')+'</button></div></div><div class="moduleBottomTools"><button class="collapseBtn" onclick="toggleModuleCollapse(this)">收起</button></div></div>';
   return html;
+}
+function renderMainExerciseCards(workout,exercises){
+  var html='',rendered=0,errors=[];
+  (exercises||[]).forEach(function(exercise,index){
+    try{
+      var card=mainCardHTML(exercise,index,workout,false);
+      if(card){html+=card;rendered++;}
+    }catch(error){
+      errors.push({exercise:exercise,error:error});
+      console.error('[main-render] exercise card failed',{
+        workoutId:workout&&workout.workoutId||'',
+        workoutTitle:workout&&(workout.title||workout['训练主题'])||'',
+        exerciseId:exercise&&exercise.exerciseId||'',
+        exerciseName:exercise&&exercise.name||'',
+        exerciseIndex:index
+      },error);
+    }
+  });
+  var canonicalCount=Array.isArray(workout&&workout.exercises)?workout.exercises.filter(function(exercise){return !exercise.isWarmup&&exercise.section!=='功能模块';}).length:0;
+  var rest=typeof isRestWorkout==='function'?isRestWorkout(workout):String(workout&&workout.workoutType||'').toLowerCase()==='rest';
+  if(!rest&&canonicalCount>0&&rendered===0){
+    var diagnostic=new Error('MAIN_EXERCISE_RENDER_FAILED');
+    diagnostic.code='MAIN_EXERCISE_RENDER_FAILED';
+    console.error('MAIN_EXERCISE_RENDER_FAILED',{
+      workoutId:workout&&workout.workoutId||'',
+      workoutTitle:workout&&(workout.title||workout['训练主题'])||'',
+      exerciseCount:canonicalCount
+    },errors[0]&&errors[0].error||diagnostic);
+    html='<div class="mainRenderDiagnostic"><b>正式动作显示失败</b><span>训练数据仍在，请刷新页面；如仍出现请截图最近的错误信息。</span><code>MAIN_EXERCISE_RENDER_FAILED</code></div>';
+  }else if(errors.length){
+    html='<div class="mainRenderDiagnostic"><b>部分动作显示失败</b><span>其余动作已保留显示，训练数据没有被修改。</span></div>'+html;
+  }
+  return {html:html,renderedCount:rendered,canonicalCount:canonicalCount,errors:errors};
 }
 function currentWorkoutExerciseById(exerciseId){
   var workout=getWorkout();
@@ -1838,9 +1883,8 @@ function rebuild(){
   parseAndRenderWarmups(false,warmupItems,warmupResolution.kind==='structured'?warmupResolution.groups:[]);
   renderNoteInputs();
   renderCompleteDebugStatus();
-  var html='';
-  exs.forEach(function(ex,ei){ html+=mainCardHTML(ex,ei,w,false); });
-  document.getElementById('exercises').innerHTML=html || '<pre>休息/轻活动：今天不需要正式训练。</pre>';
+  var mainRender=renderMainExerciseCards(w,exs);
+  document.getElementById('exercises').innerHTML=mainRender.html || '<pre>休息/轻活动：今天不需要正式训练。</pre>';
   restoreCurrentWorkoutDraft();
   bindTrainingDataInputs(document);
   renderModuleMap();
