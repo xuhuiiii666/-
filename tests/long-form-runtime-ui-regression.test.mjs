@@ -56,7 +56,7 @@ function loadAppRuntime(program,profileExtras={},rootOverride=null){
     'planner-import-v2.js','import-validator.js','plan-compiler.js','importer.js','program-store.js'
   ].forEach(file=>loadScript(context,file));
   const source=fs.readFileSync(path.join(root,'app.js'),'utf8').replace(
-    "rebuild();showTab('today');initWarmupPanel();initFloatingNoteDrag();bindGeneralTimerControls();",
+    "rebuild();showTab('today');initWorkoutUiPreferences();bindGeneralTimerControls();",
     ''
   );
   vm.runInContext(source,context,{filename:'app.js'});

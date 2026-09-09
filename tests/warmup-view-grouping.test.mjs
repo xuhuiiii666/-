@@ -91,7 +91,7 @@ test('W7. 紧凑子阶段用稳定 card/set ID 写回对应草稿实体',()=>{
   const source=fs.readFileSync(path.join(root,'app.js'),'utf8');
   assert.match(source,/data-card-id="\$\{escapeHtml\(viewExerciseId\)\}"/);
   assert.match(source,/warmupSetHTML\([^\n]+stage\.viewSetId/);
-  assert.match(source,/saved\.exerciseId&&cards\.find/);
+  assert.match(source,/saved\.exerciseId\?cards\.find/);
   assert.match(source,/updateSetValue\(card\?\(card\.getAttribute\('data-card-id'\)/);
 });
 

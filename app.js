@@ -412,11 +412,13 @@ function findCurrentSet(exerciseId,setId){
     groups=groups.concat((draft.warmups||[]).filter(function(x){return x.exerciseId===exerciseId;}));
     groups=groups.concat((draft.mains||[]).filter(function(x){return x.exerciseId===exerciseId;}));
   }
-  if(!groups.length) groups=[].concat(draft.warmups||[],draft.mains||[]);
+  if(!exerciseId) groups=[].concat(draft.warmups||[],draft.mains||[]);
+  var canonical=(getWorkout().exercises||[]).concat(draftCanonicalWarmups(getWorkout()));
+  var previous=[].concat(draft.warmups||[],draft.mains||[]);
   for(var i=0;i<groups.length;i++){
     var sets=groups[i].sets||[];
     for(var j=0;j<sets.length;j++){
-      if(sets[j].setId===setId) return sets[j];
+      if(sets[j].setId===setId&&draftSetBelongsToExercise(groups[i].exerciseId,setId,canonical,previous)) return sets[j];
     }
   }
   return null;
@@ -438,9 +440,40 @@ function updateSetValue(exerciseId,setId,field,value,opts){
   state.currentWorkoutDrafts[currentDraftKey()].updatedAt=new Date().toISOString();
   if(!opts.noSave)saveState();
 }
+function draftCanonicalWarmups(workout){
+  return (typeof structuredWarmupItems==='function'?structuredWarmupItems(workout):[]).map(function(stage){
+    return {exerciseId:stage.viewExerciseId||stage.exerciseId,sets:[{setId:stage.viewSetId||stage.setId}]};
+  });
+}
+function draftSetBelongsToExercise(exerciseId,setId,canonical,previous){
+  if(!setId)return true;
+  if(!exerciseId)return false;
+  var owners=(canonical||[]).filter(function(ex){return (ex.setsData||ex.sets||[]).some(function(st){return st.setId===setId;});});
+  if(!owners.length)owners=(previous||[]).filter(function(ex){return (ex.sets||[]).some(function(st){return st.setId===setId;});});
+  return owners.every(function(ex){return ex.exerciseId===exerciseId;});
+}
+function mergeReadableDraftItems(readable,previous,canonical,allCanonical,allPrevious){
+  readable.forEach(function(item){
+    var old=(previous||[]).find(function(ex){return ex.exerciseId&&ex.exerciseId===item.exerciseId;});
+    var entity=(canonical||[]).find(function(ex){return ex.exerciseId===item.exerciseId;});
+    item.sets=item.sets.filter(function(st){return draftSetBelongsToExercise(item.exerciseId,st.setId,allCanonical,allPrevious);});
+    (old&&old.sets||[]).forEach(function(st){
+      if(st.setId&&!item.sets.some(function(row){return row.setId===st.setId;})&&
+        (entity&&(entity.setsData||entity.sets)||[]).some(function(row){return row.setId===st.setId;})&&
+        draftSetBelongsToExercise(item.exerciseId,st.setId,allCanonical,allPrevious))item.sets.push(st);
+    });
+  });
+  // Missing DOM cards are not deletions while their canonical entity still exists.
+  (previous||[]).forEach(function(old){
+    if(old.exerciseId&&!readable.some(function(item){return item.exerciseId===old.exerciseId;})&&
+      (canonical||[]).some(function(ex){return ex.exerciseId===old.exerciseId;}))readable.push(old);
+  });
+  return readable;
+}
 function captureCurrentWorkoutDraft(){
   state.currentWorkoutDrafts=state.currentWorkoutDrafts||{};
   var currentWorkout=getWorkout();
+  var previous=state.currentWorkoutDrafts[currentDraftKey()]||{};
   var draft={updatedAt:new Date().toISOString(),workoutId:currentWorkout&&currentWorkout.workoutId,sourceWorkoutKey:currentWorkout&&currentWorkout.sourceWorkoutKey||'',planIndex:state.currentIndex,note:getCurrentSessionNote(),warmupInput:(document.getElementById('warmupInput')&&document.getElementById('warmupInput').value)||'',warmups:[],mains:[]};
   document.querySelectorAll('#warmupExercises .warmCard').forEach(function(card){
     draft.warmups.push({exerciseId:card.getAttribute('data-card-id')||card.id||'',name:(card.querySelector('[data-field="warmName"]')&&card.querySelector('[data-field="warmName"]').value)||'',note:(card.querySelector('[data-field="moduleNote"]')&&card.querySelector('[data-field="moduleNote"]').value)||'',sets:Array.prototype.slice.call(card.querySelectorAll('.warmSets .setrow')).map(readSetRow)});
@@ -448,10 +481,24 @@ function captureCurrentWorkoutDraft(){
   document.querySelectorAll('#exercises .mainCard').forEach(function(card){
     draft.mains.push({exerciseId:card.getAttribute('data-card-id')||card.id||'',name:(card.querySelector('[data-field="mainName"]')&&card.querySelector('[data-field="mainName"]').value)||'',originalName:card.getAttribute('data-original-name')||'',trackName:card.getAttribute('data-track-name')||'',custom:card.hasAttribute('data-custom-main'),note:(card.querySelector('[data-field="moduleNote"]')&&card.querySelector('[data-field="moduleNote"]').value)||'',sets:Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow')).map(readSetRow)});
   });
+  var canonical=currentWorkout&&currentWorkout.exercises||[];
+  var warmups=draftCanonicalWarmups(currentWorkout);
+  var allCanonical=canonical.concat(warmups),allPrevious=[].concat(previous.mains||[],previous.warmups||[]);
+  draft.mains=mergeReadableDraftItems(draft.mains,previous.mains,canonical,allCanonical,allPrevious);
+  draft.warmups=mergeReadableDraftItems(draft.warmups,previous.warmups,warmups,allCanonical,allPrevious);
   state.currentWorkoutDrafts[currentDraftKey()]=draft;
   return draft;
 }
-function syncCurrentWorkoutFormToState(){
+function hasIncompleteMainWorkoutRender(){
+  var workout=getWorkout();
+  if(typeof isRestWorkout==='function'&&isRestWorkout(workout))return false;
+  var expected=(workout&&workout.exercises||[]).filter(function(ex){return !ex.isWarmup&&ex.section!=='功能模块';});
+  var cards=Array.prototype.slice.call(document.querySelectorAll('#exercises .mainCard'));
+  return !!document.querySelector('#exercises .mainRenderDiagnostic')||expected.some(function(ex){
+    return ex.exerciseId&&!cards.some(function(card){return (card.getAttribute('data-card-id')||card.id)===ex.exerciseId;});
+  });
+}
+function syncCurrentWorkoutFormToState(opts){
   syncFloatingNote();
   var warmInput=document.getElementById('warmupInput');
   if(warmInput){
@@ -459,8 +506,8 @@ function syncCurrentWorkoutFormToState(){
     state.customWarmups[workoutWarmupKey()]=warmInput.value;
   }
   var draft=captureCurrentWorkoutDraft();
-  state.currentWorkoutLogDraft=buildWorkoutLogSnapshotFromDom('草稿');
-  saveState();
+  if(!hasIncompleteMainWorkoutRender())state.currentWorkoutLogDraft=buildWorkoutLogSnapshotFromDom('草稿');
+  if(!opts||!opts.noSave)saveState();
   return draft;
 }
 function rebuildCurrentWorkoutLogDraft(){
@@ -471,9 +518,36 @@ function rebuildCurrentWorkoutLogDraft(){
     state.customWarmups[workoutWarmupKey()]=warmInput.value;
   }
   captureCurrentWorkoutDraft();
-  state.currentWorkoutLogDraft=buildWorkoutLogSnapshotFromDom('草稿');
+  if(!hasIncompleteMainWorkoutRender())state.currentWorkoutLogDraft=buildWorkoutLogSnapshotFromDom('草稿');
   saveState();
   return state.currentWorkoutLogDraft;
+}
+function restoreDraftCardSets(card,saved,idx,isWarmup,canonical,previous){
+  var exerciseId=card.getAttribute('data-card-id')||card.id||'';
+  var wrap=card.querySelector(isWarmup?'.warmSets':'.mainSets');
+  if(!wrap)return;
+  // Legacy text rendering creates fresh placeholder rows; retain the draft IDs, not both copies.
+  if(saved.exerciseId&&(saved.sets||[]).length&&!canonical.some(function(ex){return ex.exerciseId===exerciseId;})&&
+    saved.sets.every(function(st){return st.setId&&draftSetBelongsToExercise(exerciseId,st.setId,canonical,previous);})){
+    Array.prototype.slice.call(wrap.querySelectorAll('.setrow')).forEach(function(row){
+      var id=row.getAttribute('data-set-id');
+      if(!canonical.concat(previous).some(function(ex){return (ex.setsData||ex.sets||[]).some(function(st){return st.setId===id;});}))row.remove();
+    });
+  }
+  (saved.sets||[]).forEach(function(st,i){
+    if(!draftSetBelongsToExercise(exerciseId,st.setId,canonical,previous))return;
+    var rows=Array.prototype.slice.call(wrap.querySelectorAll('.setrow'));
+    var row=st.setId?rows.find(function(item){return item.getAttribute('data-set-id')===st.setId;}):rows[i];
+    if(!row&&saved.exerciseId&&st.setId){
+      var custom=card.hasAttribute('data-custom-main');
+      wrap.insertAdjacentHTML('beforeend',isWarmup?
+        warmupSetHTML(idx,rows.length+1,st.reps||'',st.rest||30,st.duration||'',st.setId):
+        mainSetForCardHTML(card,idx,rows.length+1,st.reps||'',st.rir||'',{min:60,max:240,def:st.rest||120,label:custom?'自定':'辅助'},st.duration||'',custom,(saved.sets||[]).length,st.setId));
+      row=Array.prototype.slice.call(wrap.querySelectorAll('.setrow')).find(function(item){return item.getAttribute('data-set-id')===st.setId;});
+    }
+    if(row)writeSetRow(row,st);
+  });
+  normalizeSetNumbersInDom(wrap);
 }
 function restoreCurrentWorkoutDraft(){
   var draft=state.currentWorkoutDrafts&&state.currentWorkoutDrafts[currentDraftKey()];
@@ -481,34 +555,20 @@ function restoreCurrentWorkoutDraft(){
     refreshAllAnchorAssessments();
     return;
   }
+  var canonical=(getWorkout().exercises||[]).concat(draftCanonicalWarmups(getWorkout()));
+  var previous=[].concat(draft.mains||[],draft.warmups||[]);
   if(draft.note!==undefined) setCurrentSessionNote(draft.note,{noSave:true});
   (draft.warmups||[]).forEach(function(saved,idx){
     var cards=Array.prototype.slice.call(document.querySelectorAll('#warmupExercises .warmCard'));
-    var card=(saved.exerciseId&&cards.find(function(item){return (item.getAttribute('data-card-id')||item.id||'')===saved.exerciseId;}))||cards[idx]; if(!card) return;
+    var card=saved.exerciseId?cards.find(function(item){return (item.getAttribute('data-card-id')||item.id||'')===saved.exerciseId;}):(!(saved.sets||[]).some(function(st){return st.setId;})?cards[idx]:null); if(!card) return;
     var name=card.querySelector('[data-field="warmName"]'); if(name&&saved.name) name.value=saved.name;
-    var wrap=card.querySelector('.warmSets');
-    var rows=Array.prototype.slice.call(card.querySelectorAll('.warmSets .setrow'));
-    while(wrap && rows.length<(saved.sets||[]).length){
-      var st=(saved.sets||[])[rows.length]||{};
-      wrap.insertAdjacentHTML('beforeend',warmupSetHTML(idx,rows.length+1,st.reps||'',st.rest||30,st.duration||'',st.setId));
-      rows=Array.prototype.slice.call(card.querySelectorAll('.warmSets .setrow'));
-    }
-    (saved.sets||[]).forEach(function(st,i){ if(rows[i]) writeSetRow(rows[i],st); });
-    if(wrap) normalizeSetNumbersInDom(wrap);
+    restoreDraftCardSets(card,saved,idx,true,canonical,previous);
   });
   (draft.mains||[]).forEach(function(saved,idx){
-    var card=(saved.exerciseId&&document.getElementById(saved.exerciseId))||document.querySelectorAll('#exercises .mainCard')[idx]; if(!card) return;
+    var cards=Array.prototype.slice.call(document.querySelectorAll('#exercises .mainCard'));
+    var card=saved.exerciseId?cards.find(function(item){return (item.getAttribute('data-card-id')||item.id||'')===saved.exerciseId;}):(!(saved.sets||[]).some(function(st){return st.setId;})?cards[idx]:null); if(!card) return;
     var name=card.querySelector('[data-field="mainName"]'); if(name&&saved.name) name.value=saved.name;
-    var wrap=card.querySelector('.mainSets');
-    var rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow'));
-    while(wrap && rows.length<(saved.sets||[]).length){
-      var st=(saved.sets||[])[rows.length]||{};
-      var custom=card.hasAttribute('data-custom-main');
-      wrap.insertAdjacentHTML('beforeend',mainSetForCardHTML(card,idx,rows.length+1,st.reps||'',st.rir||'',{min:60,max:240,def:st.rest||120,label:custom?'自定':'辅助'},st.duration||'',custom,(saved.sets||[]).length,st.setId));
-      rows=Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow'));
-    }
-    (saved.sets||[]).forEach(function(st,i){ if(rows[i]) writeSetRow(rows[i],st); });
-    if(wrap) normalizeSetNumbersInDom(wrap);
+    restoreDraftCardSets(card,saved,idx,false,canonical,previous);
   });
   refreshAllAnchorAssessments();
 }
@@ -2027,7 +2087,7 @@ function setCurrentSessionNote(value,opts){
   state.currentSessionNote=value;
   state.draftNote=value;
   state.quickNote=value;
-  renderNoteInputs();
+  if(!opts||!opts.noRender)renderNoteInputs();
   if(!opts || !opts.noSave) saveState();
   return value;
 }
@@ -2784,12 +2844,13 @@ function calcTargetWeight(){
 }
 
 
-function setWarmupPanelCollapsed(collapsed){
+function setWarmupPanelCollapsed(collapsed,opts){
   var panel=document.getElementById('warmupPanel');
   var btn=document.getElementById('warmupToggleBtn');
   if(!panel||!btn)return;
   if(collapsed){panel.classList.add('collapsed');btn.textContent='展开';}
   else{panel.classList.remove('collapsed');btn.textContent='收起';}
+  if(opts&&opts.renderOnly)return;
   trainingTrackerState.ui=trainingTrackerState.ui||{};
   trainingTrackerState.ui.warmupPanelCollapsed=!!collapsed;
   saveState();
@@ -2800,7 +2861,11 @@ function toggleWarmupPanel(){
   setWarmupPanelCollapsed(!panel.classList.contains('collapsed'));
 }
 function initWarmupPanel(){
-  setWarmupPanelCollapsed(!!(trainingTrackerState.ui&&trainingTrackerState.ui.warmupPanelCollapsed));
+  setWarmupPanelCollapsed(!!(trainingTrackerState.ui&&trainingTrackerState.ui.warmupPanelCollapsed),{renderOnly:true});
+}
+function initWorkoutUiPreferences(){
+  try{initWarmupPanel();}catch(error){console.error('热身折叠显示初始化失败',error);}
+  try{initFloatingNoteDrag();}catch(error){console.error('浮动记录显示初始化失败',error);}
 }
 
 
@@ -2811,9 +2876,9 @@ function buildWorkoutLogSnapshotFromDom(status){
   var logDate=actualDateFor(state.currentIndex) || localDateString();
   return {date:logDate, actualDate:logDate, scheduledDate:scheduledDateFor(state.currentIndex), plannedDate:plannedDateFor(state.currentIndex), workoutId:w.workoutId, sourceWorkoutKey:w.sourceWorkoutKey||'', planIndex:state.currentIndex, title:w['训练主题'], stage:w['阶段'], status:status||'已完成', note:note, entries:entries};
 }
-function buildWorkoutLogFromCurrent(){
+function buildWorkoutLogFromCurrent(opts){
   markCurrentTrainingToday({noSave:true});
-  syncCurrentWorkoutFormToState();
+  syncCurrentWorkoutFormToState(opts);
   return buildWorkoutLogSnapshotFromDom('已完成');
 }
 function pad2(n){return String(n).padStart(2,'0');}
@@ -2869,11 +2934,11 @@ function showBrief(text){
   box.classList.remove('hidden');
   try{box.scrollIntoView({behavior:'smooth',block:'nearest'});}catch(e){}
 }
-function setCompleteDebugStatus(status,error){
+function setCompleteDebugStatus(status,error,opts){
   state.lastCompleteStatus=status||'暂无';
   state.lastCompleteError=error||'';
   state.lastCompleteAt=new Date().toISOString();
-  renderCompleteDebugStatus();
+  if(!opts||!opts.noRender)renderCompleteDebugStatus();
 }
 function renderCompleteDebugStatus(){
   var box=document.getElementById('completeDebugStatus');
@@ -2931,12 +2996,27 @@ function getBackupFileName(refLog){
 }
 function finishWorkoutCompleteBackup(){
   console.log('[complete] click');
-  var log=null, brief='';
+  var finish=finishWorkoutCompleteBackup;
+  if(finish.running)return;
+  var intent=[trainingTrackerState.activeProfileId,trainingTrackerState.activeProgramId,currentDraftKey(),localDateString()].join('|');
+  var last=finish.lastCommit;
+  if(last&&(last.intent===intent||last.refreshFailed||Date.now()-last.at<800)){
+    if(last.refreshFailed){
+      try{rebuild();last.refreshFailed=false;}catch(refreshError){console.error('[complete] post-commit refresh failed',refreshError);}
+    }
+    alert('本次训练已保存，请确认页面已刷新后继续。');
+    return;
+  }
+  var log=null,brief='',before=null,committed=false;
+  var dateInput=document.getElementById('actualDate'),dateInputBefore=dateInput&&dateInput.value;
+  finish.running=true;
   try{
+    before=JSON.parse(JSON.stringify(trainingTrackerState));
+    if(hasIncompleteMainWorkoutRender())throw new Error('正式动作显示不完整，原草稿已保留，请刷新页面后再完成训练。');
     console.log('[complete] save log start');
     syncFloatingNote();
     var completedIndex=state.currentIndex;
-    log=buildWorkoutLogFromCurrent();
+    log=buildWorkoutLogFromCurrent({noSave:true});
     brief=buildBriefText(log);
     state.logs.push(log);
     archiveSessionNote(log);
@@ -2950,12 +3030,15 @@ function finishWorkoutCompleteBackup(){
     state.lastBackupAt=new Date().toISOString();
     console.log('[complete] move next');
     state.currentIndex=Math.min(state.currentIndex+1,PLAN.length-1);
-    if(!state.keepNoteForNext) setCurrentSessionNote('',{noSave:true});
+    if(!state.keepNoteForNext) setCurrentSessionNote('',{noSave:true,noRender:true});
     state.keepNoteForNext=false;
-    setCompleteDebugStatus('成功','');
+    setCompleteDebugStatus('成功','',{noRender:true});
     saveState();
+    committed=true;
+    finish.lastCommit={intent:intent,at:Date.now(),refreshFailed:true};
     showBrief(brief);
     rebuild();
+    finish.lastCommit.refreshFailed=false;
     showToast('已完成今日训练，已进入下一练');
     try{
       console.log('[complete] backup start');
@@ -2964,16 +3047,20 @@ function finishWorkoutCompleteBackup(){
       console.log('[complete] done');
     }catch(backupError){
       console.error('备份导出失败',backupError);
-      setCompleteDebugStatus('成功','自动备份失败：'+(backupError&&backupError.message?backupError.message:backupError));
-      saveState();
-      showToast('训练已完成，但自动备份失败，请手动导出周期备份');
+      try{setCompleteDebugStatus('成功','自动备份失败：'+(backupError&&backupError.message?backupError.message:backupError));}catch(statusError){console.error('[complete] status render failed',statusError);}
       alert('已完成今日训练，已进入下一练。\n但自动备份失败，请点击“手动导出周期备份”。');
     }
   }catch(error){
     console.error('[complete] failed',error);
-    setCompleteDebugStatus('失败',error&&error.message?error.message:String(error));
-    saveState();
-    alert('完成训练失败：'+(error&&error.message?error.message:error));
+    if(!committed&&before){
+      bindTrainingRuntime(before);
+      if(dateInput)dateInput.value=dateInputBefore;
+    }
+    var message=error&&error.message?error.message:String(error);
+    try{setCompleteDebugStatus(committed?'成功':'失败',message);}catch(statusError){console.error('[complete] status render failed',statusError);}
+    alert((committed?'训练已保存，但页面刷新/显示失败，请刷新页面。\n':'完成训练保存失败，本次未完成，请重试。\n')+message);
+  }finally{
+    finish.running=false;
   }
 }
 function currentMainWorkoutHasWeight(){
@@ -3172,4 +3259,4 @@ function refreshCalendarAndFocus(delay){
   };
 })();
 
-rebuild();showTab('today');initWarmupPanel();initFloatingNoteDrag();bindGeneralTimerControls();
+rebuild();showTab('today');initWorkoutUiPreferences();bindGeneralTimerControls();
