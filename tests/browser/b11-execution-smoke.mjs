@@ -1,0 +1,207 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import {createRequire} from 'node:module';
+import {fileURLToPath} from 'node:url';
+import {loadTrainingModules} from '../helpers.mjs';
+import {longFormRows} from '../fixtures/long-form-daily-fixture.mjs';
+
+const require=createRequire(process.env.PLAYWRIGHT_PACKAGE||import.meta.url);
+const {chromium,webkit}=require('playwright');
+const directory=fileURLToPath(new URL('../../',import.meta.url));
+const m=loadTrainingModules();
+const parsed=m.parseLongFormDailyGrid(longFormRows,{fileName:'anonymous.xlsx',sheetName:'手机查看版_一日一格'});
+const program=m.createProgramFromPlan(parsed.plan,{name:'匿名执行测试',source:'long-form-daily-v1'});
+program.sharedSourceBlocks=parsed.sharedSourceBlocks;
+const w=program.days[0],base=w.exercises[0];
+program.days=[w];
+w.exercises=['绳索弯举','绳索下压'].map((name,i)=>({
+  ...base,exerciseId:'test:E'+i,sourceExerciseKey:'source:E'+i,name,originalName:name,trackingName:name,
+  line:name+' 2x10-15 RIR2',supersetId:'SS01',setCount:2,reps:'10-15',rir:'2',
+  sets:[1,2].map(setNo=>({...base.sets[0],setId:'test:E'+i+':S'+setNo,setNo,setType:'working',rest:90,targetRestMin:90,targetRestMax:90,targetRepsMin:10,targetRepsMax:15,targetRirMin:2,targetRirMax:2,reps:'12',rir:'2',weight:'',weightKg:0,segments:[],prescriptionDefined:true}))
+}));
+w.supersetRules=[{supersetId:'SS01',mode:'alternating',members:w.exercises.map(e=>e.exerciseId),roundRestMinSec:90,roundRestMaxSec:90,transitionMinSec:0,transitionMaxSec:15}];
+program.workoutLogs=[{logId:'prior',actualDate:'2026-08-01',workoutId:'prior-workout',title:'匿名历史',entries:w.exercises.map((e,i)=>({type:'主训练',name:e.name,trackingName:e.trackingName,set:1,weight:String(i?20:12.5),weightKg:i?20:12.5,unit:'kg',reps:'12',rir:'2'}))}];
+const root={schemaVersion:6,activeProfileId:'PF',activeProgramId:program.programId,profiles:{PF:{profileId:'PF',programs:{[program.programId]:program},exerciseTemplates:[],warmupTemplates:[],rmRecords:[]}},ui:{}};
+const server=http.createServer((req,res)=>{
+  const name=new URL(req.url,'http://localhost').pathname,file=path.join(directory,name==='/'?'index.html':name);
+  if(!fs.existsSync(file)||!fs.statSync(file).isFile()){res.writeHead(404);res.end();return;}
+  res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');fs.createReadStream(file).pipe(res);
+});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const engine=process.env.BROWSER_ENGINE==='webkit'?webkit:chromium;
+const browser=await engine.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE&&engine===chromium?{executablePath:process.env.CHROMIUM_EXECUTABLE}:{})});
+try{
+  const context=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
+  await context.addInitScript(root=>{
+    localStorage.setItem('training-tracker-state',JSON.stringify(root));
+    window.__intervals=new Set();const set=window.setInterval,clear=window.clearInterval;
+    window.setInterval=(...args)=>{const id=set(...args);__intervals.add(id);return id;};
+    window.clearInterval=id=>{__intervals.delete(id);clear(id);};
+  },root);
+  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.dismiss());
+  await page.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'load'});
+  const baseline=await page.evaluate(()=>({exercises:JSON.stringify(getWorkout().exercises),logs:JSON.stringify(state.workoutLogs),dates:JSON.stringify(state.actualDates),fingerprint:programContentFingerprint(getActiveProgram()).hash}));
+  const group=page.locator('#exercises > .supersetCard');
+  assert.equal(await group.count(),1);
+  assert.equal(await group.locator('.mainCard').count(),2);
+  assert.equal(await group.locator('.setrow').count(),4);
+  assert.equal(await group.locator('.restBtn:visible').count(),2);
+  assert.equal(await group.locator('.compoundSegment').count(),0);
+  await page.evaluate(()=>document.fonts.ready);
+  const compactBudget=await group.evaluate(card=>{
+    const height=selector=>card.querySelector(selector).getBoundingClientRect().height;
+    const titles=[...card.querySelectorAll('.supersetRoundTitle')].map(e=>e.getBoundingClientRect());
+    const rows=[...card.querySelectorAll('.setrow')];
+    const end=Math.max(...rows.map(e=>e.getBoundingClientRect().bottom));
+    const rounds=[titles[1].top-titles[0].top,end-titles[1].top];
+    const memberHeight=rows.map(row=>row.querySelector('.liftLine').getBoundingClientRect().bottom-row.querySelector('.supersetMemberHeading').getBoundingClientRect().top);
+    const total=card.getBoundingClientRect().height,header=height('.supersetHead')+height('.supersetMeta'),cue=height('.supersetCue'),history=height('.supersetHistory');
+    return {total,header,cue,history,rounds,memberHeight,management:[...card.querySelectorAll('.supersetOptions')].reduce((n,e)=>n+e.getBoundingClientRect().height,0),spacing:total-header-cue-history-rounds.reduce((a,b)=>a+b,0)};
+  });
+  assert.ok(compactBudget.total<=650,JSON.stringify(compactBudget));
+  assert.equal(compactBudget.management,0);
+  assert.ok(compactBudget.history>=32&&compactBudget.history<=40);
+  assert.ok(compactBudget.rounds.every(h=>h<=225));
+  assert.ok(compactBudget.memberHeight.every(h=>h<=78));
+  assert.equal(await group.locator('.supersetOptions:visible, .supersetSetExtra:visible').count(),0);
+  const viewOnlyBefore=await page.evaluate(()=>localStorage.getItem('training-tracker-state'));
+  await group.locator('.supersetAdjustToggle').tap();
+  assert.equal(await group.locator('.supersetOptions:visible').count(),2);
+  assert.ok((await group.boundingBox()).height>compactBudget.total);
+  await group.locator('.supersetAdjustToggle').tap();
+  assert.equal((await group.boundingBox()).height,compactBudget.total);
+  await group.locator('.supersetInstructions>summary').tap();
+  assert.match(await group.locator('.supersetInstructions p').innerText(),/动作间切换/);
+  await group.locator('.supersetInstructions>summary').tap();
+  assert.equal((await group.boundingBox()).height,compactBudget.total);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('training-tracker-state')),viewOnlyBefore);
+  assert.match(await group.locator('.supersetHistory > summary').innerText(),/A1 12.5kg×12.*A2 20kg×12/);
+  const bounds=await group.locator('.setrow').evaluateAll(rows=>rows.map(r=>({id:r.dataset.setId,y:r.getBoundingClientRect().top})));
+  assert.deepEqual(bounds.sort((a,b)=>a.y-b.y).map(r=>r.id),['test:E0:S1','test:E1:S1','test:E0:S2','test:E1:S2']);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  for(const control of await group.locator('.restBtn:visible, .liftLine input:visible, .liftLine select:visible, .supersetAdjustToggle').all()){
+    assert.ok((await control.boundingBox()).height>=44);
+    assert.ok(await control.evaluate(e=>parseFloat(getComputedStyle(e).fontSize)>=15));
+  }
+  for(const text of await group.locator('.supersetMemberHeading, .supersetHead>b, .supersetHead>strong, .supersetMeta, .supersetHistory>summary').all())assert.ok(await text.evaluate(e=>parseFloat(getComputedStyle(e).fontSize)>=15));
+  await group.evaluate(e=>e.scrollIntoView({block:'center',behavior:'instant'}));
+  for(const control of await group.locator('.restBtn:visible, .liftLine input:visible, .liftLine select:visible').all())assert.ok(await control.evaluate(e=>{const r=e.getBoundingClientRect(),target=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return target===e||e.contains(target);}));
+  await group.screenshot({path:process.env.SCREENSHOT_PATH||'/tmp/training-b11-superset-390px.png'});
+  const first=group.locator('[data-set-id="test:E0:S1"]'),second=group.locator('[data-set-id="test:E1:S1"]');
+  await first.locator('[data-field="weight"]').fill('13');
+  await second.locator('[data-field="weight"]').fill('21');
+  assert.deepEqual(await page.evaluate(()=>[getDraftSetByDomId('test:E0:S1').weight,getDraftSetByDomId('test:E1:S1').weight]),['13','21']);
+  const afterInputs=await page.evaluate(()=>JSON.stringify(state.actualDates));
+  await page.evaluate(()=>{window.__rowStarts=0;const original=startRowTimer;window.startRowTimer=function(...args){__rowStarts++;return original(...args);};});
+  await second.locator('.restBtn').tap();
+  assert.equal(await page.evaluate(()=>__rowStarts),1);
+  assert.equal(await group.locator('.done').count(),2);
+  assert.equal(await second.locator('.miniTimer').textContent(),'01:30');
+  await page.waitForTimeout(1100);
+  assert.equal(await second.locator('.miniTimer').textContent(),'01:29');
+  assert.equal(await page.evaluate(()=>__intervals.size),1);
+  assert.equal(await group.locator('[data-set-id="test:E1:S2"] .miniTimer').textContent(),'01:30');
+  await page.evaluate(()=>{activeTimerContext.endAt=Date.now()+80000;tickRealTimer();});
+  assert.equal(await second.locator('.miniTimer').textContent(),'01:20');
+  await page.evaluate(()=>{rebuild();});
+  assert.equal(await first.locator('[data-field="weight"]').inputValue(),'13');
+  assert.equal(await second.locator('[data-field="weight"]').inputValue(),'21');
+  assert.equal(await second.locator('.miniTimer').textContent(),'01:20');
+  assert.equal(await group.locator('.done').count(),2);
+  const entries=await page.evaluate(()=>collectEntries().filter(e=>e.type==='主训练'));
+  assert.deepEqual(entries.map(e=>[e.trackingName,e.weight]),[['绳索弯举','13'],['绳索弯举',''],['绳索下压','21'],['绳索下压','']]);
+  const safety=await page.evaluate(()=>({exercises:JSON.stringify(getWorkout().exercises),logs:JSON.stringify(state.workoutLogs),dates:JSON.stringify(state.actualDates),fingerprint:programContentFingerprint(getActiveProgram()).hash}));
+  assert.equal(safety.exercises,baseline.exercises);
+  assert.equal(safety.logs,baseline.logs);
+  assert.equal(safety.dates,afterInputs);
+  assert.equal(safety.fingerprint,baseline.fingerprint);
+  await page.evaluate(()=>{activeTimerContext.endAt=Date.now()-1;tickRealTimer();});
+  assert.equal(await second.locator('.miniTimer').textContent(),'00:00');
+  assert.equal(await group.locator('.done').count(),2);
+  const confirm=page.locator('#timerConfirmMask.show button');if(await confirm.count())await confirm.first().tap();
+  const options=group.locator('.supersetOptions').first();await group.locator('.supersetAdjustToggle').tap();
+  await options.locator('[onclick="addMainSet(this)"]').tap();
+  assert.equal(await group.locator('.setrow').count(),5);
+  assert.equal(await group.locator('.restBtn:visible').count(),3);
+  assert.equal(await group.locator('.supersetRoundTitle').count(),3);
+  const third=group.locator('[data-set-no="3"]');
+  await group.locator('.supersetAdjustToggle').tap();
+  await third.locator('.supersetSetExtra > summary').tap();await third.locator('.delBtn').tap();
+  assert.equal(await group.locator('.setrow').count(),4);
+  assert.equal(await group.locator('.supersetRoundTitle').count(),2);
+  assert.equal(await group.locator('.restBtn:visible').count(),2);
+  await group.locator('.supersetHistory>summary').tap();
+  assert.match(await group.locator('.supersetHistory').innerText(),/绳索弯举/);
+  assert.match(await group.locator('.supersetHistory').innerText(),/绳索下压/);
+  await group.locator('.supersetHistory>summary').tap();
+  await group.locator('.supersetAdjustToggle').tap();
+  const title=options.locator('[data-field="mainName"]');await title.fill('弯举测试');
+  assert.equal(await title.evaluate(e=>e===document.activeElement),true);
+  assert.match(await group.locator('.supersetHead>strong').innerText(),/弯举测试/);
+  await page.evaluate(()=>{state.exerciseTemplates=[{id:'b11-switch',name:'锤式弯举',trackName:'锤式弯举',sets:[{reps:'10',rir:'2',rest:90},{reps:'10',rir:'2',rest:90}]}];});
+  await options.locator('[onclick="openExerciseTemplateSwitcher(this)"]').tap();
+  // Existing mobileDock overlays this separate modal. Test the replacement handler
+  // explicitly without claiming an unobstructed mobile click or changing its CSS.
+  await page.evaluate(()=>switchExerciseTemplate('b11-switch'));
+  assert.equal(await page.locator('#exerciseTemplateModal.show').count(),0);
+  assert.equal(await group.count(),1);
+  assert.match(await group.locator('.supersetHead>strong').innerText(),/锤式弯举/);
+  assert.equal(await second.locator('[data-field="weight"]').inputValue(),'21');
+  assert.equal(await group.locator('.restBtn:visible').count(),2);
+  assert.equal(await page.evaluate(()=>new Set(Array.from(document.querySelectorAll('#exercises .setrow'),e=>e.dataset.setId)).size),4);
+  await group.locator(':scope > summary').tap();assert.equal(await group.locator('.restBtn:visible').count(),0);
+  await group.locator(':scope > summary').tap();assert.equal(await group.locator('.restBtn:visible').count(),2);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await group.locator('.mainCard').first().locator('[data-field="weight"]').first().fill('60');
+  const firstNewSetId=await group.locator('.mainCard').first().locator('.setrow').first().getAttribute('data-set-id');
+  await page.evaluate(()=>{window.__normalMainCard=mainCardHTML;window.mainCardHTML=function(ex,...args){if(ex.exerciseId==='test:E0')throw new Error('B11 injected member failure');return __normalMainCard(ex,...args);};rebuild();captureCurrentWorkoutDraft();});
+  assert.equal(await group.locator('.mainCard').count(),1);
+  assert.equal(await second.locator('[data-field="weight"]').inputValue(),'21');
+  assert.equal(await page.evaluate(id=>getDraftSetByDomId(id).weight,firstNewSetId),'60');
+  const beforePartialClick=await page.evaluate(()=>__rowStarts);
+  await second.locator('.restBtn').tap();assert.equal(await page.evaluate(()=>__rowStarts),beforePartialClick);
+  const draftBeforeFailure=await page.evaluate(()=>JSON.stringify(state.currentWorkoutDrafts[currentDraftKey()].mains));
+  await page.evaluate(()=>{window.mainCardHTML=()=>{throw new Error('B11 injected all-card failure');};rebuild();captureCurrentWorkoutDraft();});
+  assert.equal(await page.locator('#exercises .mainCard').count(),0);
+  assert.equal(await page.evaluate(()=>JSON.stringify(state.currentWorkoutDrafts[currentDraftKey()].mains)),draftBeforeFailure);
+  await page.evaluate(()=>{window.mainCardHTML=__normalMainCard;rebuild();});
+  assert.deepEqual(errors,[]);
+  console.log(JSON.stringify({engine:process.env.BROWSER_ENGINE||'chromium',mobile:390,compactBudget,supersetCards:1,rounds:2,inputOwnership:'PASS',roundCompletion:'PASS',background:'PASS',rebuildDrafts:'PASS',canonicalAndLogs:'UNCHANGED before explicit edits',addDelete:'PASS',renameFocus:'PASS',templateSwitchHandler:'PASS (modal tap blocked by pre-existing mobileDock)',singleTapSingleStart:'PASS',partialAndAllCardFailure:'PASS',errors},null,2));
+  await context.close();
+  const timerProgram=m.createProgramFromPlan(parsed.plan,{name:'匿名正式组对照',source:'long-form-daily-v1'});
+  timerProgram.sharedSourceBlocks=parsed.sharedSourceBlocks;
+  const tw=timerProgram.days[0],te=tw.exercises[0];
+  timerProgram.days=[tw];tw.exercises=[te];te.setCount=3;
+  te.sets=[1,2,3].map(setNo=>({...te.sets[0],setId:'timer:main:S'+setNo,setNo,rest:180,targetRestMin:180,targetRestMax:180,prescriptionDefined:true}));
+  const timerRoot=JSON.parse(JSON.stringify(root));timerRoot.activeProgramId=timerProgram.programId;timerRoot.profiles.PF.programs={[timerProgram.programId]:timerProgram};
+  const tc=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
+  await tc.addInitScript(root=>{localStorage.setItem('training-tracker-state',JSON.stringify(root));window.__intervals=new Set();const set=window.setInterval,clear=window.clearInterval;window.setInterval=(...args)=>{const id=set(...args);__intervals.add(id);return id;};window.clearInterval=id=>{__intervals.delete(id);clear(id);};},timerRoot);
+  const tp=await tc.newPage(),timerErrors=[];tp.on('pageerror',e=>timerErrors.push(e.message));tp.on('dialog',d=>d.dismiss());
+  await tp.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'load'});
+  const timerBefore=await tp.evaluate(()=>({exercises:JSON.stringify(getWorkout().exercises),logs:JSON.stringify(state.workoutLogs),index:state.currentIndex}));
+  const report={};
+  for(const [kind,selector,seconds] of [['warmup','#warmupExercises .setrow',30],['main','#exercises .setrow',180]]){
+    const row=tp.locator(selector).first(),id=await row.getAttribute('data-set-id');
+    await tp.evaluate(({id,seconds})=>{const range=document.getElementById('rest_'+id).querySelector('input');range.disabled=false;range.min=15;range.max=300;range.value=seconds;updateRestValue(id,seconds);},{id,seconds});
+    const snapshot=()=>tp.evaluate(id=>({id,timerLeft,activeSet,context:activeTimerContext,row:rowTimers[id]||null,text:document.getElementById('mt_'+id).textContent,button:document.getElementById('rest_'+id).querySelector('button').textContent,intervals:__intervals.size}),id);
+    const snapshots=[await snapshot()];await row.locator('.restBtn').tap();snapshots.push(await snapshot());
+    await tp.waitForTimeout(1100);snapshots.push(await snapshot());await tp.waitForTimeout(1000);snapshots.push(await snapshot());
+    assert.deepEqual(snapshots.slice(1).map(s=>s.row.left),[seconds,seconds-1,seconds-2]);
+    assert.equal(snapshots[1].intervals,1);assert.equal(snapshots[3].intervals,1);
+    if(kind==='main'){
+      await tp.evaluate(()=>{activeTimerContext.endAt=Date.now()+170000;tickRealTimer();});
+      assert.equal((await snapshot()).text,'02:50');assert.equal((await snapshot()).intervals,1);
+    }
+    await tp.evaluate(()=>{activeTimerContext.endAt=Date.now()-1;tickRealTimer();});snapshots.push(await snapshot());
+    assert.equal(snapshots.at(-1).text,'00:00');assert.equal(snapshots.at(-1).intervals,0);
+    assert.match(await row.getAttribute('class'),/done/);
+    if(kind==='main')assert.match(await tp.locator('[data-set-id="timer:main:S2"] .restBtn').getAttribute('class'),/nextReady/);
+    report[kind]=snapshots;
+    const confirm=tp.locator('#timerConfirmMask.show button');if(await confirm.count())await confirm.first().tap();
+  }
+  assert.deepEqual(await tp.evaluate(()=>({exercises:JSON.stringify(getWorkout().exercises),logs:JSON.stringify(state.workoutLogs),index:state.currentIndex})),timerBefore);
+  assert.deepEqual(timerErrors,[]);console.log(JSON.stringify({timerAB:report,errors:timerErrors},null,2));
+  await tc.close();
+}finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

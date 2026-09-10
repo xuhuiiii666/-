@@ -148,6 +148,26 @@
     return {kind:'none',text:'',items:[]};
   }
 
+  function groupSupersetsForDisplay(workout,exercises){
+    var items=asArray(exercises||workout&&workout.exercises),groups=[],used=new Set();
+    items.forEach(function(exercise){
+      if(used.has(exercise))return;
+      var id=text(exercise.supersetId),members=id?items.filter(function(item){return text(item.supersetId)===id;}):[exercise];
+      if(members.length<2){used.add(exercise);groups.push({kind:'exercise',members:[exercise]});return;}
+      var rule=asArray(workout&&workout.supersetRules).find(function(item){return text(item.supersetId)===id;})||{};
+      var order=asArray(rule.members);
+      members=members.slice().sort(function(a,b){var ai=order.indexOf(a.exerciseId),bi=order.indexOf(b.exerciseId);return (ai<0?items.indexOf(a)+order.length:ai)-(bi<0?items.indexOf(b)+order.length:bi);});
+      var sets=members.map(function(member){return asArray(member.setsData||member.sets);});
+      var rounds=Array.from({length:Math.max.apply(null,sets.map(function(rows){return rows.length;}))},function(_,index){
+        return members.map(function(member,i){return sets[i][index]?{exercise:member,set:sets[i][index],memberIndex:i}:null;}).filter(Boolean);
+      });
+      members.forEach(function(member){used.add(member);});
+      groups.push({kind:'superset',workoutId:workout&&workout.workoutId,supersetId:id,rule:rule,members:members,rounds:rounds});
+    });
+    return groups;
+  }
+
+  global.groupSupersetsForDisplay=groupSupersetsForDisplay;
   global.isRestWorkout=isRestWorkout;
   global.structuredWarmupActivities=structuredWarmupActivities;
   global.groupWarmupItemsForDisplay=groupWarmupItemsForDisplay;

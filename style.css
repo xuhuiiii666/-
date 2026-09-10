@@ -1290,6 +1290,84 @@ body{
 .compoundSegmentHead span{overflow-wrap:anywhere}
 .importPrecheck.storageWarning{border-color:rgba(255,149,0,.5);background:rgba(255,149,0,.08)}
 .importPrecheck.storageStrongWarning{border-color:rgba(255,59,48,.55);background:rgba(255,59,48,.09)}
+.supersetCard{min-width:0;padding:12px;border-radius:8px}
+.supersetHead{display:grid;gap:5px;cursor:pointer;list-style:none;min-height:44px;overflow-wrap:anywhere}
+.supersetHead::-webkit-details-marker{display:none}
+.supersetHead>b{font-size:13px;color:var(--muted);font-weight:500}
+.supersetHead>strong{font-size:17px;font-weight:600;line-height:1.4}
+.supersetHead>span{font-size:12px;color:var(--muted);line-height:1.5}
+.supersetContent{padding-top:8px}
+.supersetHistory,.supersetInstructions{font-size:12px;border-bottom:1px solid var(--line);padding:4px 0}
+.supersetHistory>summary{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px;cursor:pointer;list-style:none}
+.supersetHistory>summary>span:first-child{min-width:0;overflow-wrap:anywhere;color:var(--muted)}
+.supersetHistory>summary>span:last-child{flex-shrink:0;color:var(--blue)}
+.supersetInstructions>summary,.supersetOptions>summary,.supersetSetExtra>summary{cursor:pointer;min-height:44px;display:flex;align-items:center;color:var(--muted);font-size:12px}
+.supersetInstructions p{white-space:pre-wrap;line-height:1.5}
+.supersetRounds{display:grid;grid-template-columns:minmax(0,1fr);gap:6px}
+.supersetCard .supersetMember,.supersetMember>.moduleBody,.supersetMember .mainSets{display:contents!important}
+.supersetMember>.planSummary,.supersetMember>.lastRef,.supersetMember>.small,.supersetMember>.compoundCue,.supersetMember>.moduleBottomTools{display:none!important}
+.supersetRoundTitle{border-top:1px solid var(--line);padding:12px 0 2px;color:var(--muted);font-size:13px}
+.supersetCard .supersetSet{display:block;position:relative;min-width:0;margin:0;padding:4px 0;border:0;background:transparent}
+.supersetSet>label,.supersetSet>.setRoundLabel{display:none}
+.supersetSet>.setPrescription[hidden]{display:none!important}
+.supersetMemberHeading{display:block;font-size:14px;font-weight:600;line-height:1.5;margin-bottom:6px;padding-right:54px;overflow-wrap:anywhere}
+.supersetSet .liftLine{display:grid;grid-template-columns:minmax(0,1.3fr) 52px 10px minmax(0,1fr) 10px minmax(0,.8fr);gap:5px;align-items:center;margin:0}
+.supersetSet .liftLine input,.supersetSet .liftLine select{width:100%;min-width:0;min-height:44px!important;height:44px!important;font-size:16px;padding:8px 6px}
+.supersetSet .liftLine select{font-size:13px;color:var(--muted)}
+.supersetSet:not(.supersetRestOwner)>.row>.restCell{display:none}
+.supersetSet>.row>.delBtn{display:none}
+.supersetSet>.row:has(>.restCell){margin:0}
+.supersetRestOwner>.row{display:block;margin-top:8px!important}
+.supersetRestOwner .restCell{display:grid;grid-template-columns:minmax(0,1fr) 70px;gap:8px;min-width:0;margin:0;width:100%}
+.supersetRestOwner .restBtn{width:100%;min-height:44px!important;padding:10px 8px;font-size:14px}
+.supersetRestOwner .miniTimer{font-size:20px;min-height:44px;padding:9px 5px}
+.supersetRestOwner .restCell input:disabled{display:none}
+.supersetRestOwner .restCell:has(input:disabled) .restTop{display:none}
+.supersetOptions{min-width:0;border-top:1px solid var(--line)}
+.supersetOptions .moduleHead{display:block}
+.supersetOptions .moduleTools{display:flex;flex-wrap:wrap}
+.supersetOptions button,.supersetSetExtra button{min-height:44px}
+.supersetOptions .moduleTools>button[onclick^="moveModule"]{display:none}
+.supersetSetExtra{margin-top:2px}
+.supersetSetExtra>summary{position:absolute;right:0;top:0;min-width:44px;justify-content:center}
+.supersetSetExtra[open]{padding-top:8px}
+.supersetSetExtra .anchorCalibration{margin:0}
+.supersetCompactCard{padding:10px!important;font-size:15px;line-height:20px}
+.supersetCompactCard .supersetHead{grid-template-columns:minmax(0,1fr) 52px;gap:0;min-height:0;align-items:center}
+.supersetCompactCard .supersetHead>b{font-size:15px;line-height:20px}
+.supersetCompactCard .supersetHead>strong{grid-column:1/-1;font-size:15px;line-height:20px}
+.supersetCompactCard .supersetAdjustToggle{height:44px!important;min-height:44px!important;font-size:15px!important;padding:0 4px!important}
+.supersetCompactCard .supersetMeta{font-size:15px;line-height:20px;margin-top:2px;overflow-wrap:anywhere}
+.supersetCompactCard .supersetContent{padding-top:4px}
+.supersetCompactCard .supersetCue{position:relative;min-height:24px;line-height:24px;font-size:15px;padding-right:32px;color:var(--muted)}
+.supersetCompactCard .supersetInstructions{padding:0;margin:0;border:0;font-size:15px}
+.supersetCompactCard .supersetInstructions>summary{position:absolute;right:0;top:0;width:28px;min-height:24px;line-height:24px;justify-content:center;font-size:18px}
+.supersetCompactCard .supersetInstructions p{font-size:15px;line-height:22px;margin:4px 0 8px}
+.supersetCompactCard .supersetHistory{font-size:15px;padding:0;margin:0;border:0}
+.supersetCompactCard .supersetHistory>summary{min-height:36px;height:36px;gap:6px;font-size:15px;line-height:20px}
+.supersetCompactCard .supersetHistory>summary>span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.supersetCompactCard .supersetHistory>summary>span:last-child{font-size:15px}
+.supersetCompactCard .supersetAdjustTools,.supersetCompactCard .supersetOptions{display:none}
+.supersetCompactCard.supersetAdjustOpen .supersetAdjustTools{display:flex;flex-wrap:wrap;gap:6px;padding:8px 0}
+.supersetCompactCard.supersetAdjustOpen .supersetOptions{display:block}
+.supersetCompactCard .supersetOptions>summary{font-size:15px}
+.supersetCompactCard .supersetAdjustTools button,.supersetCompactCard .supersetOptions button{min-height:44px!important;height:auto!important;font-size:15px!important}
+.supersetCompactCard .supersetRounds{gap:4px;margin-top:4px}
+.supersetCompactCard .supersetRoundTitle{font-size:15px;line-height:20px;padding:4px 0;margin:0}
+.supersetCompactCard .supersetSet{margin:0!important;padding:0!important;gap:0!important;font-size:15px;line-height:20px}
+.supersetCompactCard .supersetMemberHeading{font-size:15px;line-height:20px;margin:0 0 4px}
+.supersetCompactCard .supersetSet .liftLine input,.supersetCompactCard .supersetSet .liftLine select{font-size:16px!important;height:44px!important;min-height:44px!important}
+.supersetCompactCard .supersetSet .liftLine .op{font-size:15px;line-height:20px}
+.supersetCompactCard .supersetSet:not(.supersetRestOwner)>.row{margin:0!important}
+.supersetCompactCard .supersetRestOwner>.row{margin:4px 0 0!important}
+.supersetCompactCard .supersetRestOwner .restCell{grid-template-columns:minmax(0,1fr) 70px!important;gap:6px!important}
+.supersetCompactCard .supersetRestOwner .restBtn{height:44px!important;min-height:44px!important;font-size:15px!important;line-height:20px!important;padding:8px 6px!important}
+.supersetCompactCard .supersetRestOwner .miniTimer{height:44px!important;min-height:44px!important;width:70px!important;font-size:18px!important;line-height:26px;padding:8px 4px!important}
+.supersetCompactCard .supersetSetExtra{display:none;margin:0}
+.supersetCompactCard.supersetAdjustOpen .supersetSetExtra{display:block}
+.supersetCompactCard .supersetSetExtra>summary{position:static;font-size:15px;min-height:44px;justify-content:flex-start}
+.supersetCompactCard .supersetSetExtra[open]{padding-top:8px}
+.supersetCompactCard .supersetSetExtra button{height:auto!important;min-height:44px!important;font-size:15px!important}
 @media(max-width:430px){
   .structuredActivityHead{display:grid;gap:3px}
   .structuredWorkoutMeta{display:block}

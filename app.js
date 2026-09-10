@@ -59,6 +59,7 @@ function safeDomId(prefix,index,name){
 }
 function scrollToExerciseCard(card){
   if(!card) return;
+  card=card.closest('.supersetCard')||card;
   setTimeout(function(){
     try{card.scrollIntoView({behavior:'smooth',block:'center'});}catch(e){}
     try{
@@ -354,13 +355,14 @@ function readSetRow(row){
   if(segments.length) data.segments=segments;
   return data;
 }
-function writeSetRow(row,data){
+function writeSetRow(row,data,opts){
   if(!row||!data) return;
+  if(opts&&opts.restoreCompletion&&data.completed!==undefined){row.classList.toggle('done',!!data.completed);row.setAttribute('data-completed',data.completed?'1':'0');}
   if(data.setId) row.setAttribute('data-set-id',data.setId);
   if(data.setNo) row.setAttribute('data-set-no',data.setNo);
   if(Array.isArray(data.userEditedFields)&&data.userEditedFields.length)row.setAttribute('data-user-edited-fields',data.userEditedFields.join(','));
   [['data-set-type',data.setType||'working'],['data-target-reps-min',data.targetRepsMin],['data-target-reps-max',data.targetRepsMax],['data-target-rir-min',data.targetRirMin],['data-target-rir-max',data.targetRirMax],['data-target-rest-min',data.targetRestMin],['data-target-rest-max',data.targetRestMax],['data-load-adjustment-type',data.loadAdjustmentType],['data-load-adjustment-value',data.loadAdjustmentValue],['data-technique-cue',data.techniqueCue]].forEach(function(pair){if(pair[1]!==undefined&&pair[1]!==null)row.setAttribute(pair[0],pair[1]);});
-  var set=function(sel,val){var x=row.querySelector(sel); if(x&&val!==undefined){x.value=val==null?'':val; if(x.type==='range') updateRestLabel(x);}};
+  var set=function(sel,val){var x=row.querySelector(sel); if(x&&val!==undefined){x.value=val==null?'':val; if(x.type==='range') updateRestLabel(x,{renderOnly:true});}};
   set('[data-field="weight"]',data.weight);
   set('[data-field="unit"]',data.unit||'kg');
   set('[data-field="reps"]',data.reps);
@@ -545,7 +547,7 @@ function restoreDraftCardSets(card,saved,idx,isWarmup,canonical,previous){
         mainSetForCardHTML(card,idx,rows.length+1,st.reps||'',st.rir||'',{min:60,max:240,def:st.rest||120,label:custom?'自定':'辅助'},st.duration||'',custom,(saved.sets||[]).length,st.setId));
       row=Array.prototype.slice.call(wrap.querySelectorAll('.setrow')).find(function(item){return item.getAttribute('data-set-id')===st.setId;});
     }
-    if(row)writeSetRow(row,st);
+    if(row)writeSetRow(row,st,{restoreCompletion:true});
   });
   normalizeSetNumbersInDom(wrap);
 }
@@ -1041,7 +1043,7 @@ function dropModule(ev){
 }
 
 function allVisibleModuleCards(){
-  return Array.prototype.slice.call(document.querySelectorAll('#warmupExercises > .warmupDisplayGroup, #warmupExercises > .exercise, #exercises .exercise'));
+  return Array.prototype.slice.call(document.querySelectorAll('#warmupExercises > .warmupDisplayGroup, #warmupExercises > .exercise, #exercises > .exercise'));
 }
 function moduleDisplayName(card){
   if(!card) return '训练模块';
@@ -1059,7 +1061,7 @@ function applyModuleColors(){
   });
 }
 function moduleCardsForSection(section){
-  var sel=section==='warm'?'#warmupExercises > .warmupDisplayGroup, #warmupExercises > .exercise':'#exercises .exercise';
+  var sel=section==='warm'?'#warmupExercises > .warmupDisplayGroup, #warmupExercises > .exercise':'#exercises > .exercise';
   return Array.prototype.slice.call(document.querySelectorAll(sel));
 }
 function scrollToModule(section,idx){
@@ -1085,7 +1087,7 @@ function renderModuleMap(){
   var box=document.getElementById('moduleMap'); if(!box) return;
   applyModuleColors();
   function list(section){
-    var sel=section==='warm'?'#warmupExercises > .warmupDisplayGroup, #warmupExercises > .exercise':'#exercises .exercise';
+    var sel=section==='warm'?'#warmupExercises > .warmupDisplayGroup, #warmupExercises > .exercise':'#exercises > .exercise';
     var label=section==='warm'?'热身':'正式';
     var cards=Array.prototype.slice.call(document.querySelectorAll(sel));
     if(!cards.length) return '';
@@ -1338,11 +1340,11 @@ function safeMainCardHelper(label,fallback,callback,exercise,workout){
     return fallback;
   }
 }
-function mainCardHTML(ex,ei,w,custom){
+function mainCardHTML(ex,ei,w,custom,options){
   custom=!!(custom||ex.custom);
   var suggested=custom?'':safeMainCardHelper('suggestWeight','',function(){return suggestWeight(ex.name,ex.reps);},ex,w);
   var rr=custom?{min:60,max:240,def:120,label:'自定'}:restRangeFor(ex,w);
-  var compound=safeMainCardHelper('compoundSpec',null,function(){return compoundSpecForExercise(ex);},ex,w);
+  var compound=options&&options.supersetMember?null:safeMainCardHelper('compoundSpec',null,function(){return compoundSpecForExercise(ex);},ex,w);
   var hasMultiStage=Array.isArray(ex.setsData)&&ex.setsData.some(function(set){return Array.isArray(set&&set.segments)&&set.segments.length;});
   var setCount=parseInt(ex.sets,10)||1;
   var repTxt=String(ex.reps||'');
@@ -1374,10 +1376,13 @@ function mainCardHTML(ex,ei,w,custom){
 }
 function renderMainExerciseCards(workout,exercises){
   var html='',rendered=0,errors=[];
+  var groups=typeof groupSupersetsForDisplay==='function'?groupSupersetsForDisplay(workout,exercises):(exercises||[]).map(function(ex){return {kind:'exercise',members:[ex]};});
+  var groupedIds=new Set(),cards=new Map();
+  groups.forEach(function(group){if(group.kind==='superset')group.members.forEach(function(ex){groupedIds.add(ex.exerciseId);});});
   (exercises||[]).forEach(function(exercise,index){
     try{
-      var card=mainCardHTML(exercise,index,workout,false);
-      if(card){html+=card;rendered++;}
+      var card=mainCardHTML(exercise,index,workout,false,{supersetMember:groupedIds.has(exercise.exerciseId)});
+      if(card){cards.set(exercise,card);rendered++;}
     }catch(error){
       errors.push({exercise:exercise,error:error});
       console.error('[main-render] exercise card failed',{
@@ -1388,6 +1393,10 @@ function renderMainExerciseCards(workout,exercises){
         exerciseIndex:index
       },error);
     }
+  });
+  groups.forEach(function(group){
+    var content=group.members.map(function(ex){return cards.get(ex)||'';}).join('');
+    if(content)html+=group.kind==='superset'?safeMainCardHelper('supersetCard',content,function(){return supersetCardHTML(group,content);},group.members[0],workout):content;
   });
   var canonicalCount=Array.isArray(workout&&workout.exercises)?workout.exercises.filter(function(exercise){return !exercise.isWarmup&&exercise.section!=='功能模块';}).length:0;
   var rest=typeof isRestWorkout==='function'?isRestWorkout(workout):String(workout&&workout.workoutType||'').toLowerCase()==='rest';
@@ -1404,6 +1413,121 @@ function renderMainExerciseCards(workout,exercises){
     html='<div class="mainRenderDiagnostic"><b>部分动作显示失败</b><span>其余动作已保留显示，训练数据没有被修改。</span></div>'+html;
   }
   return {html:html,renderedCount:rendered,canonicalCount:canonicalCount,errors:errors};
+}
+function supersetCardHTML(group,content){
+  var members=group.members,rule=group.rule||{},names=members.map(function(ex){return ex.name;}).join(' + ');
+  var reps=members.map(function(ex){return String(ex.reps||'');}),rir=members.map(function(ex){return String(ex.rir||'');});
+  var rest=rule.roundRestMinSec!==null&&rule.roundRestMinSec!==undefined?String(rule.roundRestMinSec)+(rule.roundRestMaxSec!==null&&rule.roundRestMaxSec!==undefined&&rule.roundRestMaxSec!==rule.roundRestMinSec?'–'+rule.roundRestMaxSec:'')+'s':'';
+  var summary=[group.rounds.length+'轮',reps[0]&&reps.every(function(v){return v===reps[0];})?reps[0]+'次':'各动作按组处方',rir[0]&&rir.every(function(v){return v===rir[0];})?'RIR'+rir[0]:'',rest&&'休'+rest].filter(Boolean).join('｜');
+  var history=members.map(function(ex,i){
+    return safeMainCardHelper('supersetHistory','A'+(i+1)+' 暂无',function(){
+      var record=typeof getLastExercisePerformance==='function'?getLastExercisePerformance(ex.trackName||ex.trackingName||ex.name):null;
+      var set=record&&(record.sets||[]).find(function(st){return st.weight||st.weightKg;});
+      return 'A'+(i+1)+' '+(set?((set.weight||set.weightKg)+(set.weight?set.unit||'kg':'kg')+'×'+(set.reps||'-')):'暂无');
+    },ex,{workoutId:group.workoutId});
+  }).join('｜');
+  var fullHistory=members.map(function(ex,i){return '<div><b>A'+(i+1)+'｜'+escapeHtml(ex.name)+'</b>'+safeMainCardHelper('supersetHistoryDetails','历史暂不可用',function(){return lastReferenceHTML(ex.trackName||ex.trackingName||ex.name);},ex,{workoutId:group.workoutId})+'</div>';}).join('');
+  var titles=group.rounds.map(function(_,i){return '<div class="supersetRoundTitle" style="grid-row:'+(i*(members.length+1)+1)+'">第'+(i+1)+'/'+group.rounds.length+'轮</div>';}).join('');
+  var transition=rule.transitionMinSec!==null&&rule.transitionMinSec!==undefined?'动作间切换 '+rule.transitionMinSec+(rule.transitionMaxSec!==null&&rule.transitionMaxSec!==undefined&&rule.transitionMaxSec!==rule.transitionMinSec?'–'+rule.transitionMaxSec:'')+'s':'';
+  var instructions=[transition,rule.note].concat(members.filter(function(ex){return ex.techniqueCue;}).map(function(ex){return ex.name+'：'+ex.techniqueCue;})).filter(Boolean).join('\n');
+  var flow=members.map(function(_,i){return 'A'+(i+1);}).join(' → ')+(rest?' → 休息'+rest:'');
+  return '<details class="exercise supersetCard supersetCompactCard" data-superset-id="'+escapeHtml(group.supersetId)+'" data-display-name="'+escapeHtml(names)+'" open><summary class="supersetHead"><b>'+escapeHtml(rule.name||group.supersetId.split(':').pop())+' 交替超级组</b><button type="button" class="supersetAdjustToggle" aria-expanded="false" onclick="event.preventDefault();event.stopPropagation();toggleSupersetAdjust(this)">调整</button><strong>'+escapeHtml(names)+'</strong></summary><div class="supersetMeta">'+escapeHtml(summary)+'</div><div class="supersetContent"><div class="supersetCue"><span>'+escapeHtml(flow)+'</span>'+(instructions?'<details class="supersetInstructions"><summary title="执行说明" aria-label="展开执行说明">ⓘ</summary><p>'+escapeHtml(instructions)+'</p></details>':'')+'</div><details class="supersetHistory"><summary><span title="'+escapeHtml(history)+'">上次｜'+escapeHtml(history)+'</span><span>历史</span></summary>'+fullHistory+'</details><div class="supersetAdjustTools"><button type="button" onclick="moveModule(this,-1)">上移超级组</button><button type="button" onclick="moveModule(this,1)">下移超级组</button></div><div class="supersetRounds">'+titles+content+'</div></div></details>';
+}
+function toggleSupersetAdjust(button){
+  var container=button.closest('.supersetCard');if(!container)return;
+  var expanded=container.classList.toggle('supersetAdjustOpen');
+  button.setAttribute('aria-expanded',String(expanded));
+  container.querySelectorAll('.supersetOptions').forEach(function(options){options.open=expanded;});
+  container.open=true;
+}
+function decorateSupersetCards(){
+  var groups=groupSupersetsForDisplay(getWorkout(),parseExercises(getWorkout()['训练内容（组×次数/余力）'],getWorkout()));
+  document.querySelectorAll('#exercises .supersetCard').forEach(function(container){
+    var group=groups.find(function(item){return item.supersetId===container.getAttribute('data-superset-id');});if(!group)return;
+    var commonTargets=group.members.every(function(ex){return String(ex.reps||'')===String(group.members[0].reps||'')&&String(ex.rir||'')===String(group.members[0].rir||'');});
+    if(!container.dataset.supersetBound){
+      container.dataset.supersetBound='1';
+      container.addEventListener('click',function(event){
+        var button=event.target.closest('button'),action=button&&button.getAttribute('onclick')||'';
+        if(/^(addMainSet|duplicateMainSet|removeMainSet|removeMainProject)\(/.test(action))refreshSupersetDisplay(container);
+      });
+    }
+    var memberCards=Array.prototype.slice.call(container.querySelectorAll('.mainCard'));
+    memberCards.forEach(function(card){
+      var index=group.members.findIndex(function(ex){return ex.exerciseId===card.getAttribute('data-card-id');});if(index<0)return;
+      card.classList.add('supersetMember');card.removeAttribute('draggable');
+      if(!card.querySelector('.supersetOptions')){
+        var options=document.createElement('details');options.className='supersetOptions';
+        var label=document.createElement('summary');label.textContent='A'+(index+1)+' '+group.members[index].name+' · 动作设置';options.appendChild(label);
+        var head=card.querySelector('.moduleHead');if(head)options.appendChild(head);
+        var tools=card.querySelector('.warmTools');if(tools)options.appendChild(tools);
+        var cue=card.querySelector('.exerciseTechniqueCue');if(cue)options.appendChild(cue);
+        var reference=card.querySelector(':scope > .small');if(reference)options.appendChild(reference);
+        card.appendChild(options);
+      }
+      card.querySelector('.supersetOptions').style.gridRow=String(group.rounds.length*(group.members.length+1)+index+1);
+      card.querySelectorAll('.mainSets .setrow').forEach(function(row,roundIndex){
+        row.classList.add('supersetSet');row.style.gridRow=String(roundIndex*(group.members.length+1)+index+2);
+        var savedSet=getDraftSetByDomId(row.getAttribute('data-set-id'));
+        if(savedSet&&savedSet.completed){row.classList.add('done');row.setAttribute('data-completed','1');}
+        if(!row.querySelector('.supersetSetExtra')){
+          var extra=document.createElement('details');extra.className='supersetSetExtra';
+          var summary=document.createElement('summary');summary.textContent='更多';extra.appendChild(summary);
+          var duration=row.querySelector('.actionCell'),durationInput=duration&&duration.querySelector('[data-field="duration"]');
+          if(duration&&!(durationInput&&durationInput.value))extra.appendChild(duration);
+          var anchor=row.querySelector('.anchorCalibration');if(anchor)extra.appendChild(anchor);
+          var remove=row.querySelector('.delBtn');if(remove)extra.appendChild(remove);
+          if(extra.children.length>1)row.appendChild(extra);
+        }
+        var heading=row.querySelector('.supersetMemberHeading');if(!heading){heading=document.createElement('b');heading.className='supersetMemberHeading';row.prepend(heading);}
+        heading.textContent='A'+(index+1)+'｜'+group.members[index].name;
+        var round=group.rounds[roundIndex]||[],owner=round[round.length-1],ownsRest=!!owner&&owner.set.setId===row.getAttribute('data-set-id');
+        var setPlan=round.find(function(item){return item.set.setId===row.getAttribute('data-set-id');});setPlan=setPlan&&setPlan.set||{};
+        var range=function(min,max){return min===null||min===undefined?'':String(min)+(max!==null&&max!==undefined&&max!==min?'-'+max:'');};
+        var prescription=row.querySelector(':scope > .setPrescription');
+        if(prescription)prescription.hidden=commonTargets&&setPlan.setType==='working'&&!setPlan.techniqueCue&&!setPlan.loadAdjustmentType&&range(setPlan.targetRepsMin,setPlan.targetRepsMax)===String(group.members[0].reps||'').replace(/–/g,'-')&&range(setPlan.targetRirMin,setPlan.targetRirMax)===String(group.members[0].rir||'').replace(/–/g,'-')&&Number(setPlan.targetRestMin)===Number(group.rule.roundRestMinSec)&&Number(setPlan.targetRestMax)===Number(group.rule.roundRestMaxSec);
+        row.classList.toggle('supersetRestOwner',ownsRest);
+        var action=row.querySelector('.restBtn');
+        if(action&&ownsRest){
+          action.dataset.roundSetIds=JSON.stringify(round.map(function(item){return item.set.setId;}));
+          action.onclick=function(){completeSupersetRound(this);};
+          action.textContent=row.classList.contains('done')?(rowTimers[owner.set.setId]&&rowTimers[owner.set.setId].running?'已完成｜休息中':'已完成｜休息结束'):'完成本轮并休息';
+          var min=group.rule.roundRestMinSec,max=group.rule.roundRestMaxSec;
+          var slider=row.querySelector('input[type=range]'),saved=getDraftSetByDomId(row.getAttribute('data-set-id'));
+          if(slider&&min!==null&&min!==undefined){slider.min=min;slider.max=max===null||max===undefined?min:max;slider.disabled=Number(slider.min)===Number(slider.max);if(!saved)slider.value=min;}
+          if(slider){var id=row.getAttribute('data-set-id'),label=document.getElementById('rv_'+id),timer=document.getElementById('mt_'+id);if(label)label.textContent=slider.value+'s';if(timer)timer.textContent=fmt(rowTimers[id]?rowTimers[id].left:Number(slider.value));}
+        }
+      });
+    });
+  });
+}
+function refreshSupersetDisplay(container){
+  if(!container||!container.isConnected)return null;
+  var workout=getWorkout(),exercises=parseExercises(workout['训练内容（组×次数/余力）'],workout);
+  var members=exercises.filter(function(ex){return ex.supersetId===container.dataset.supersetId;});
+  var fragment=document.createElement('div');fragment.innerHTML=renderMainExerciseCards(workout,members).html;
+  var replacements=Array.prototype.slice.call(fragment.children),scroll=window.scrollY;
+  container.replaceWith.apply(container,replacements);
+  restoreCurrentWorkoutDraft();decorateSupersetCards();bindTrainingDataInputs(document);renderModuleMap();updateKpis();
+  window.scrollTo(0,scroll);
+  return replacements[0]||null;
+}
+function refreshSupersetNames(card){
+  var container=card&&card.closest('.supersetCard');if(!container)return;
+  var names=Array.prototype.map.call(container.querySelectorAll('.mainCard'),function(member,index){
+    var input=member.querySelector('[data-field="mainName"]'),name=input&&input.value||'';
+    member.querySelectorAll('.supersetMemberHeading').forEach(function(label){label.textContent='A'+(index+1)+'｜'+name;});
+    var options=member.querySelector('.supersetOptions>summary');if(options)options.textContent='A'+(index+1)+' '+name+' · 动作设置';
+    return name;
+  });
+  container.querySelector('.supersetHead>strong').textContent=names.join(' + ');container.dataset.displayName=names.join(' + ');
+}
+function completeSupersetRound(button){
+  var ids=JSON.parse(button.dataset.roundSetIds||'[]'),container=button.closest('.supersetCard');
+  var rows=ids.map(function(id){return document.getElementById('row_'+id);});
+  if(!ids.length||rows.some(function(row){return !row||!container.contains(row);})){alert('本轮动作显示不完整，请刷新后重试。');return;}
+  rows.forEach(function(row){row.classList.add('done');row.setAttribute('data-completed','1');});
+  startRowTimer(ids[ids.length-1]);
 }
 function currentWorkoutExerciseById(exerciseId){
   var workout=getWorkout();
@@ -1613,7 +1737,8 @@ function switchExerciseTemplate(id){
   try{bindTrainingDataInputs(document);}catch(e){console.error('切换动作后绑定输入失败',e);}
   try{renderModuleMap(); updateKpis();}catch(e){console.error('切换动作后刷新失败',e);}
   captureCurrentWorkoutDraft();saveState();
-  scrollToExerciseCard(newCard);
+  var groupCard=newCard&&newCard.closest('.supersetCard');
+  scrollToExerciseCard(groupCard?refreshSupersetDisplay(groupCard):newCard);
   showToast('已切换为：'+(tpl.name||'动作'));
 }
 
@@ -1846,7 +1971,7 @@ function restControlHTML(id,range,buttonText){
     <div class="miniTimer" id="mt_${id}">${fmt(range.def)}</div>
   </div>`;
 }
-function updateRestValue(id,val){
+function updateRestValue(id,val,opts){
   val=parseInt(val)||0;
   let rv=document.getElementById('rv_'+id), mt=document.getElementById('mt_'+id);
   if(rv) rv.textContent=val+'s';
@@ -1854,14 +1979,15 @@ function updateRestValue(id,val){
   var row=document.getElementById('row_'+id);
   if(row){
     row.setAttribute('data-rest',String(val));
+    if(opts&&opts.renderOnly)return;
     captureCurrentWorkoutDraft();
     saveState();
   }
 }
-function updateRestLabel(input){
+function updateRestLabel(input,opts){
   var cell=input&&input.closest?input.closest('.restCell'):null;
   if(!cell||!cell.id) return;
-  updateRestValue(cell.id.replace(/^rest_/,''),input.value);
+  updateRestValue(cell.id.replace(/^rest_/,''),input.value,opts);
 }
 
 function formatActivityDuration(activity){
@@ -1902,7 +2028,8 @@ function renderStructuredWorkoutInfo(workout){
   var activityHTML=activities.map(structuredActivityHTML).join('');
   var supersetHTML='';
   if(Array.isArray(workout.supersetRules)&&workout.supersetRules.length){
-    supersetHTML='<div class="supersetSequences">'+workout.supersetRules.map(function(rule){
+    var groupedIds=groupSupersetsForDisplay(workout).filter(function(group){return group.kind==='superset';}).map(function(group){return group.supersetId;});
+    supersetHTML='<div class="supersetSequences">'+workout.supersetRules.filter(function(rule){return groupedIds.indexOf(rule.supersetId)<0;}).map(function(rule){
       var members=(rule.members||[]).map(function(id){var exercise=(workout.exercises||[]).find(function(item){return item.exerciseId===id;});return exercise&&exercise.name||id;});
       var transition=rule.transitionMinSec===null||rule.transitionMinSec===undefined?'':String(rule.transitionMinSec)+(rule.transitionMaxSec!==null&&rule.transitionMaxSec!==undefined&&String(rule.transitionMaxSec)!==String(rule.transitionMinSec)?'-'+rule.transitionMaxSec:'')+'秒切换';
       var roundRest=rule.roundRestMinSec===null||rule.roundRestMinSec===undefined?'':String(rule.roundRestMinSec)+(rule.roundRestMaxSec!==null&&rule.roundRestMaxSec!==undefined&&String(rule.roundRestMaxSec)!==String(rule.roundRestMinSec)?'-'+rule.roundRestMaxSec:'')+'秒轮间休息';
@@ -1946,6 +2073,7 @@ function rebuild(){
   var mainRender=renderMainExerciseCards(w,exs);
   document.getElementById('exercises').innerHTML=mainRender.html || '<pre>休息/轻活动：今天不需要正式训练。</pre>';
   restoreCurrentWorkoutDraft();
+  decorateSupersetCards();
   bindTrainingDataInputs(document);
   renderModuleMap();
   updateKpis(); renderLast(exs); renderTimer();
@@ -1983,7 +2111,7 @@ function handleTrainingDataInput(ev){
     var field=ev.target.getAttribute('data-field');
     markRowFieldEdited(row,field);
     captureCurrentWorkoutDraft();
-    if(card&&field==='mainName') persistCurrentExerciseName(card,ev.target.value);
+    if(card&&field==='mainName'){persistCurrentExerciseName(card,ev.target.value);refreshSupersetNames(card);}
     if(row && field && !ev.target.closest('.compoundSegment')){
       updateSetValue(card?(card.getAttribute('data-card-id')||card.id||''):'',row.getAttribute('data-set-id')||String(row.id||'').replace(/^row_/,''),field,ev.target.value,{userEdited:true,noSave:true});
     }
@@ -2063,7 +2191,8 @@ function collectEntries(){
     });
   });
   exs.forEach((ex,ei)=>{
-    let card=document.querySelectorAll('#exercises .mainCard:not([data-custom-main])')[ei];
+    let cards=Array.prototype.slice.call(document.querySelectorAll('#exercises .mainCard:not([data-custom-main])'));
+    let card=ex.exerciseId?cards.find(function(item){return (item.getAttribute('data-card-id')||item.id)===ex.exerciseId;}):cards[ei];
     collectMainCardEntries(entries,card,{name:ex.name,originalName:ex.name,target:ex.line});
   });
   document.querySelectorAll('#exercises .mainCard[data-custom-main]').forEach((card,ci)=>{
@@ -2259,6 +2388,7 @@ function tickRealTimer(){
     if(ctx.type==='rest'){
       if(rowTimers[ctx.id])rowTimers[ctx.id].running=false;
       var b=document.getElementById('rest_'+ctx.id); if(b)b.classList.remove('restActive');
+      setRestButtonStatus(ctx.id,'restDone');
       beep();
     }else if(ctx.type==='action'){
       var a=document.getElementById('act_'+ctx.id); if(a)a.classList.remove('actionActive');
@@ -2315,6 +2445,10 @@ function setRestButtonStatus(id,status){
     btn.classList.add('completedSetBtn');
     btn.setAttribute('data-status','completed');
     btn.textContent='已完成｜休息中';
+  }else if(status==='restDone'){
+    btn.classList.add('completedSetBtn');
+    btn.setAttribute('data-status','completed');
+    btn.textContent='已完成｜休息结束';
   }else{
     btn.textContent='完成本组并开始休息';
   }
@@ -2450,9 +2584,10 @@ function startRowTimer(id,forcedRest){
     markNextSetReady(id);
     checkModuleComplete(row.closest('.exercise'));
   }
-  if(activeSet){var old=document.getElementById('rest_'+activeSet); if(old)old.classList.remove('restActive');}
+  if(activeSet){var old=document.getElementById('rest_'+activeSet); if(old)old.classList.remove('restActive');if(rowTimers[activeSet])rowTimers[activeSet].running=false;}
   activeSet=id;
-  var slider=document.querySelector('#rest_'+id+' input[type=range]');
+  var restBox=document.getElementById('rest_'+id);
+  var slider=restBox&&restBox.querySelector('input[type=range]');
   var draftSet=getDraftSetByDomId(id);
   var sec=parseInt(forcedRest || (draftSet&&draftSet.rest) || (slider?slider.value:timerBase) || 90,10);
   if(slider && String(slider.value)!==String(sec)){
@@ -2466,6 +2601,7 @@ function startRowTimer(id,forcedRest){
   clearInterval(timerId);
   if(rowTimers[id]) rowTimers[id].endAt=Date.now()+sec*1000;
   activeTimerContext={type:'rest',id:id,endAt:Date.now()+sec*1000};
+  captureCurrentWorkoutDraft();
   saveState();
   timerId=setInterval(tickRealTimer,1000);
   tickRealTimer();
