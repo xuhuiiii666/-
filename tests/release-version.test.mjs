@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import {loadImporter} from './helpers.mjs';
 import {longFormRows,workbookFromLongFormRows} from './fixtures/long-form-daily-fixture.mjs';
 
-const RELEASE='20260909-training-exec-b11';
+const RELEASE='20260910-preview-readonly-a06';
 const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 
 test('V1. 所有本地 CSS 和 JS 使用统一 release query',()=>{

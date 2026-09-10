@@ -3084,7 +3084,20 @@ function renderCompleteDebugStatus(){
   var err=state.lastCompleteError||'无';
   box.innerHTML='最近操作状态：上次完成训练：'+escapeHtml(status)+escapeHtml(at)+'<br>错误信息：'+escapeHtml(err);
 }
-function previewCurrentBrief(){showBrief(buildBriefText(buildWorkoutLogFromCurrent()));}
+function buildWorkoutPreviewSnapshot(){
+  var w=getWorkout(),index=state.currentIndex;
+  var actual=readWorkoutMap(state.actualDates,index)||w.actualDate||'';
+  var planned=plannedDateFor(index);
+  var scheduled=w.scheduledDate||calculateScheduledWorkoutDate(PLAN,index,state.actualDates,state.dateAnchors,state.startDate,'')||planned;
+  // Preview reads live inputs without the execution/draft/note synchronization path.
+  var floating=document.getElementById('floatingSessionNote'),bottom=document.getElementById('sessionNote');
+  var input=document.activeElement===floating&&floating?floating:document.activeElement===bottom&&bottom?bottom:bottom||floating;
+  var note=input?input.value||'':getCurrentSessionNote();
+  return {date:actual||scheduled||planned,actualDate:actual,scheduledDate:scheduled,plannedDate:planned,
+    workoutId:w.workoutId,sourceWorkoutKey:w.sourceWorkoutKey||'',planIndex:index,title:w['训练主题'],stage:w['阶段'],
+    status:'预览',note:note,entries:collectEntries()};
+}
+function previewCurrentBrief(){showBrief(buildBriefText(buildWorkoutPreviewSnapshot()));}
 function copyTextToClipboard(text){
   if(navigator.clipboard && navigator.clipboard.writeText){
     return navigator.clipboard.writeText(text);
