@@ -484,7 +484,7 @@ function captureCurrentWorkoutDraft(){
     draft.mains.push({exerciseId:card.getAttribute('data-card-id')||card.id||'',name:(card.querySelector('[data-field="mainName"]')&&card.querySelector('[data-field="mainName"]').value)||'',originalName:card.getAttribute('data-original-name')||'',trackName:card.getAttribute('data-track-name')||'',custom:card.hasAttribute('data-custom-main'),note:(card.querySelector('[data-field="moduleNote"]')&&card.querySelector('[data-field="moduleNote"]').value)||'',sets:Array.prototype.slice.call(card.querySelectorAll('.mainSets .setrow')).map(readSetRow)});
   });
   var canonical=currentWorkout&&currentWorkout.exercises||[];
-  var warmups=draftCanonicalWarmups(currentWorkout);
+  var warmups=Object.prototype.hasOwnProperty.call(state.customWarmups||{},workoutWarmupKey())?[]:draftCanonicalWarmups(currentWorkout);
   var allCanonical=canonical.concat(warmups),allPrevious=[].concat(previous.mains||[],previous.warmups||[]);
   draft.mains=mergeReadableDraftItems(draft.mains,previous.mains,canonical,allCanonical,allPrevious);
   draft.warmups=mergeReadableDraftItems(draft.warmups,previous.warmups,warmups,allCanonical,allPrevious);
@@ -502,11 +502,6 @@ function hasIncompleteMainWorkoutRender(){
 }
 function syncCurrentWorkoutFormToState(opts){
   syncFloatingNote();
-  var warmInput=document.getElementById('warmupInput');
-  if(warmInput){
-    state.customWarmups=state.customWarmups||{};
-    state.customWarmups[workoutWarmupKey()]=warmInput.value;
-  }
   var draft=captureCurrentWorkoutDraft();
   if(!hasIncompleteMainWorkoutRender())state.currentWorkoutLogDraft=buildWorkoutLogSnapshotFromDom('草稿');
   if(!opts||!opts.noSave)saveState();
@@ -514,11 +509,6 @@ function syncCurrentWorkoutFormToState(opts){
 }
 function rebuildCurrentWorkoutLogDraft(){
   syncFloatingNote();
-  var warmInput=document.getElementById('warmupInput');
-  if(warmInput){
-    state.customWarmups=state.customWarmups||{};
-    state.customWarmups[workoutWarmupKey()]=warmInput.value;
-  }
   captureCurrentWorkoutDraft();
   if(!hasIncompleteMainWorkoutRender())state.currentWorkoutLogDraft=buildWorkoutLogSnapshotFromDom('草稿');
   saveState();
@@ -711,21 +701,61 @@ function workoutWarmupResolution(w){
   var fallback=defaultWarmupText(w);return {kind:fallback?'legacy-template':'none',text:fallback,items:[]};
 }
 function autoSaveWarmupDraft(){
-  let w=getWorkout(), key=workoutWarmupKey(), txt=document.getElementById('warmupInput').value;
-  state.customWarmups[key]=txt; saveState(); parseAndRenderWarmups(false);
+  markWarmupStructureEdited();
+  parseAndRenderWarmups(false);
+  commitWarmupStructureEdit(true);
+}
+var warmupEditState=null;
+function warmupEditOwner(){
+  return [trainingTrackerState.activeProfileId,trainingTrackerState.activeProgramId,currentDraftKey()].join('|');
+}
+function resetWarmupEditState(sourceKind){
+  warmupEditState={owner:warmupEditOwner(),workoutId:currentDraftKey(),sourceKind:sourceKind,dirty:false};
+  var label=document.getElementById('warmupPurpose');
+  if(label)label.textContent=({structured:'结构化计划热身',rest:'休息日恢复说明',custom:'自定义热身','legacy-template':'旧热身模板',none:'未设置热身'}[sourceKind]||'热身')+'｜自动分类：'+workoutPurpose(getWorkout())+'｜可编辑成项目，支持每组独立计时。';
+}
+function markWarmupStructureEdited(){
+  if(!warmupEditState||warmupEditState.owner!==warmupEditOwner())resetWarmupEditState('custom');
+  warmupEditState.dirty=true;
+}
+function commitWarmupStructureEdit(fromText){
+  if(!warmupEditState||warmupEditState.owner!==warmupEditOwner()||!warmupEditState.dirty)return false;
+  var input=document.getElementById('warmupInput');
+  var text=fromText?input.value:templateItemsToText(getWarmupItemsFromUI());
+  state.customWarmups=state.customWarmups||{};
+  state.customWarmups[workoutWarmupKey()]=text;
+  if(input)input.value=text;
+  // The existing draft retains independent card/set IDs and execution inputs.
+  captureCurrentWorkoutDraft();
+  saveState();
+  resetWarmupEditState('custom');
+  return true;
+}
+function saveWarmupStructuralEdit(){
+  markWarmupStructureEdited();
+  commitWarmupStructureEdit(false);
 }
 function loadDefaultWarmup(){
   let w=getWorkout(); let purpose=workoutPurpose(w); let key=workoutWarmupKey();
   delete state.customWarmups[key];
   var resolved=workoutWarmupResolution(w);
+  var draft=state.currentWorkoutDrafts&&state.currentWorkoutDrafts[currentDraftKey()],canonical=draftCanonicalWarmups(w);
+  if(draft)draft.warmups=(draft.warmups||[]).filter(function(item){return canonical.some(function(ex){return ex.exerciseId===item.exerciseId;});}).map(function(item){
+    var entity=canonical.find(function(ex){return ex.exerciseId===item.exerciseId;});
+    var stage=(resolved.items||[]).find(function(st){return st.viewExerciseId===item.exerciseId;});
+    return Object.assign({},item,{name:stage?stage.name:item.name,sets:(item.sets||[]).filter(function(set){return entity.sets.some(function(st){return st.setId===set.setId;});})});
+  });
   document.getElementById('warmupInput').value = resolved.text;
   var resolvedItems=resolved.kind==='structured'?resolved.items:((resolved.kind==='rest'||resolved.kind==='none')?[]:null);
-  saveState(); parseAndRenderWarmups(false,resolvedItems);
+  resetWarmupEditState(resolved.kind);
+  parseAndRenderWarmups(false,resolvedItems,resolved.groups);
+  restoreCurrentWorkoutDraft();
+  saveState();
 }
 function saveWarmupTemplate(){
   let w=getWorkout(), purpose=workoutPurpose(w), txt=document.getElementById('warmupInput').value.trim();
   if(!txt){alert('先输入热身/退阶动作。');return;}
-  state.customWarmups[purpose]=txt; state.customWarmups[workoutWarmupKey()]=txt; saveState();
+  state.customWarmups[purpose]=txt; state.customWarmups[workoutWarmupKey()]=txt; captureCurrentWorkoutDraft();resetWarmupEditState('custom');saveState();
   alert('已保存为「'+purpose+'」热身/退阶模板。以后同类训练会优先调用。');
 }
 function parseWarmupItems(text){
@@ -799,7 +829,7 @@ function warmupCardHTML(ex,ei){
   var exists=!!findWarmupActionTemplateByName(ex.name);
   var saveCls=exists?' hidden':'';
   var statusCls=exists?'':' hidden';
-  var cardId=safeDomId('warmCard',ei,ex.name);
+  var cardId=escapeHtml(ex.exerciseId||safeDomId('warmCard',ei,ex.name));
   var html=`<div id="${cardId}" class="exercise warmCard" draggable="true" ondragstart="dragModuleStart(event)" ondragover="dragModuleOver(event)" ondrop="dropModule(event)" data-warm-card="${ei}" data-card-id="${cardId}">
     <div class="row between moduleHead">
       <div class="row"><span class="pill">热身/退阶</span><input class="warmName" data-field="warmName" oninput="renderModuleMap();refreshWarmupCardTemplateStatus(this.closest('.warmCard'))" value="${escapeHtml(ex.name)}" placeholder="名称"></div>
@@ -807,7 +837,7 @@ function warmupCardHTML(ex,ei){
     </div>
     ${lastReferenceHTML(ex.name)}
     <div class="moduleBody"><div class="warmSets">`;
-  for(var s=1;s<=ex.sets;s++) html+=warmupSetHTML(ei,s,ex.reps,ex.rest,ex.duration);
+  for(var s=1;s<=ex.sets;s++) html+=warmupSetHTML(ei,s,ex.reps,ex.rest,ex.duration,ex.setsData&&ex.setsData[s-1]&&ex.setsData[s-1].setId);
   html+=`</div><div class="row warmTools"><button class="addSetBtn blue" onclick="addWarmupSet(this)">添加下一组</button><button class="addSetBtn" onclick="duplicateWarmupSet(this)">复制上一组</button><button class="delBtn" onclick="removeWarmupProject(this)">删除项目</button></div></div>
     <div class="moduleBottomTools"><button class="collapseBtn" onclick="toggleModuleCollapse(this)">收起</button></div>
   </div>`;
@@ -837,6 +867,14 @@ function addWarmupProject(){
   document.querySelectorAll('#warmupExercises input').forEach(i=>i.removeEventListener('input', updateKpis));
   bindTrainingDataInputs(document);
   renderModuleMap();
+  saveWarmupStructuralEdit();
+}
+function renderCustomWarmupDraft(draft){
+  document.getElementById('warmupExercises').innerHTML=(draft.warmups||[]).map(function(item,index){
+    var sets=item.sets||[],first=sets[0]||{};
+    return warmupCardHTML({exerciseId:item.exerciseId,name:item.name,line:item.name,sets:sets.length,reps:first.reps||'',rest:first.rest||30,duration:first.duration||'',setsData:sets},index);
+  }).join('')||'<pre>暂无热身项目。可以点“手动添加项目”。</pre>';
+  bindTrainingDataInputs(document);renderModuleMap();
 }
 function addWarmupSet(btn){
   let card=btn.closest('.warmCard'), sets=card.querySelector('.warmSets');
@@ -852,7 +890,7 @@ function addWarmupSet(btn){
   if(row){let r=row.querySelector('[data-field="rir"]'); if(r)r.value=rir||'';}
   normalizeSetNumbersInDom(sets);
   bindTrainingDataInputs(document);
-  captureCurrentWorkoutDraft(); saveState();
+  saveWarmupStructuralEdit();
 }
 function duplicateWarmupSet(btn){
   let card=btn.closest('.warmCard'), sets=card.querySelector('.warmSets');
@@ -873,7 +911,7 @@ function duplicateWarmupSet(btn){
   }
   normalizeSetNumbersInDom(sets);
   bindTrainingDataInputs(document);
-  captureCurrentWorkoutDraft(); saveState();
+  saveWarmupStructuralEdit();
 }
 function renumberSetRows(scope){
   var rows=scope?Array.prototype.slice.call(scope.querySelectorAll('.setrow')):[];
@@ -900,7 +938,7 @@ function cleanupSetTimer(id){
 }
 function removeWarmupSet(btn){
   let row=btn.closest('.warmSet');
-  if(row){ var wrap=row.closest('.warmSets'); if(wrap&&wrap.querySelectorAll('.warmSet').length<=1){alert('至少保留一组');return;} cleanupSetTimer(row.getAttribute('data-set-id')||String(row.id||'').replace(/^row_/,'')); row.remove(); normalizeSetNumbersInDom(wrap); captureCurrentWorkoutDraft(); saveState(); }
+  if(row){ var wrap=row.closest('.warmSets'); if(wrap&&wrap.querySelectorAll('.warmSet').length<=1){alert('至少保留一组');return;} cleanupSetTimer(row.getAttribute('data-set-id')||String(row.id||'').replace(/^row_/,'')); row.remove(); normalizeSetNumbersInDom(wrap); saveWarmupStructuralEdit(); }
   updateKpis();
 }
 function removeMainSet(btn){
@@ -908,7 +946,7 @@ function removeMainSet(btn){
   if(row){ var wrap=row.closest('.mainSets'); if(wrap&&wrap.querySelectorAll('.setrow').length<=1){alert('至少保留一组');return;} var setId=row.getAttribute('data-set-id')||String(row.id||'').replace(/^row_/,''); cleanupSetTimer(setId); var card=row.closest('.mainCard'),entity=card&&currentWorkoutExerciseById(card.getAttribute('data-exercise-id')||card.getAttribute('data-card-id'));if(entity&&Array.isArray(entity.sets)){entity.sets=entity.sets.filter(function(set){return set.setId!==setId;});entity.sets.forEach(function(set,index){set.setNo=index+1;});entity.setCount=entity.sets.length;} row.remove(); normalizeSetNumbersInDom(wrap); captureCurrentWorkoutDraft(); saveState(); }
   updateKpis();
 }
-function removeWarmupProject(btn){let card=btn.closest('.warmCard'); if(card) card.remove(); updateKpis(); renderModuleMap();}
+function removeWarmupProject(btn){let card=btn.closest('.warmCard'); if(card){card.querySelectorAll('.setrow').forEach(function(row){cleanupSetTimer(row.getAttribute('data-set-id'));});card.remove();saveWarmupStructuralEdit();} updateKpis(); renderModuleMap();}
 
 function ensureWarmupTemplates(){
   state.warmupTemplates = state.warmupTemplates || [];
@@ -921,7 +959,7 @@ function closeTemplateModals(){
 function getWarmupItemsFromUI(){
   var cards=[].slice.call(document.querySelectorAll('#warmupExercises .warmCard'));
   return cards.map(function(card,ci){
-    var nameInput=card.querySelector('.warmName');
+    var nameInput=card.querySelector('[data-field="warmName"]');
     var name=(nameInput&&nameInput.value?nameInput.value.trim():'热身项目'+(ci+1));
     var sets=[].slice.call(card.querySelectorAll('.warmSet')).map(function(row){
       var get=function(sel){var x=row.querySelector(sel); return x?x.value:'';};
@@ -966,6 +1004,7 @@ function confirmSaveTemplate(){
   state.customWarmups = state.customWarmups || {};
   state.customWarmups[cat]=tpl.text;
   state.customWarmups[workoutWarmupKey()]=tpl.text;
+  captureCurrentWorkoutDraft();resetWarmupEditState('custom');
   saveState(); closeTemplateModals();
   alert('已保存模板：'+name+'。以后可以点“调用热身模板”选择。');
 }
@@ -1009,6 +1048,7 @@ function applyWarmupTemplate(id){
   document.getElementById('warmupInput').value = tpl.text || templateItemsToText(tpl.items);
   if(tpl.items && tpl.items.length) renderWarmupItemsFromTemplate(tpl.items); else parseAndRenderWarmups(false);
   state.customWarmups[workoutWarmupKey()]=document.getElementById('warmupInput').value;
+  captureCurrentWorkoutDraft();resetWarmupEditState('custom');
   saveState(); closeTemplateModals(); updateKpis();
 }
 function renameWarmupTemplate(id){
@@ -1893,10 +1933,10 @@ function fillWarmupCardFromTemplate(card,tpl){
   (tpl.sets||[]).forEach(function(st,i){var row=rows[i]; if(!row)return; var set=function(sel,val){var el=row.querySelector(sel); if(el){el.value=(val==null?'':val); if(el.type==='range') updateRestLabel(el);}}; set('[data-field="weight"]',st.weight); set('[data-field="unit"]',st.unit||'kg'); set('[data-field="reps"]',st.reps); set('[data-field="rir"]',st.rir); set('[data-field="duration"]',st.duration); set('input[type=range]',st.rest||30); var dt=row.querySelector('.actionTimer'); if(dt)dt.textContent=st.duration?fmt(parseInt(st.duration)):'--:--';});
 }
 function applyWarmupActionTemplate(id){
-  var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var wrap=document.getElementById('warmupExercises'); if(!wrap)return; if(wrap.querySelector('pre'))wrap.innerHTML=''; var idx=wrap.querySelectorAll('.warmCard').length; wrap.insertAdjacentHTML('beforeend',warmupTemplateToCardHTML(tpl,idx)); var card=wrap.querySelector('.warmCard:last-child'); closeWarmupActionTemplateModal(); try{fillWarmupCardFromTemplate(card,tpl);}catch(e){console.error('调用热身后填充组数据失败',e);} try{bindTrainingDataInputs(document);}catch(e){console.error('调用热身后绑定输入失败',e);} try{renderModuleMap(); updateKpis();}catch(e){console.error('调用热身后刷新失败',e);} saveState(); scrollToExerciseCard(card); showToast('已调用：'+(tpl.name||'热身'));
+  var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var wrap=document.getElementById('warmupExercises'); if(!wrap)return; if(wrap.querySelector('pre'))wrap.innerHTML=''; var idx=wrap.querySelectorAll('.warmCard').length; wrap.insertAdjacentHTML('beforeend',warmupTemplateToCardHTML(tpl,idx)); var card=wrap.querySelector('.warmCard:last-child'); closeWarmupActionTemplateModal(); try{fillWarmupCardFromTemplate(card,tpl);}catch(e){console.error('调用热身后填充组数据失败',e);} try{bindTrainingDataInputs(document);}catch(e){console.error('调用热身后绑定输入失败',e);} try{renderModuleMap(); updateKpis();}catch(e){console.error('调用热身后刷新失败',e);} saveWarmupStructuralEdit(); scrollToExerciseCard(card); showToast('已调用：'+(tpl.name||'热身'));
 }
 function switchWarmupActionTemplate(id){
-  var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var card=warmupActionTemplateSwitchTarget; if(!card||!document.body.contains(card)){applyWarmupActionTemplate(id);return;} var idx=Array.prototype.slice.call(document.querySelectorAll('#warmupExercises .warmCard')).indexOf(card); var tmp=document.createElement('div'); tmp.innerHTML=warmupTemplateToCardHTML(tpl,idx); var newCard=tmp.firstElementChild; card.parentNode.replaceChild(newCard,card); closeWarmupActionTemplateModal(); try{fillWarmupCardFromTemplate(newCard,tpl);}catch(e){console.error('切换热身后填充组数据失败',e);} try{bindTrainingDataInputs(document);}catch(e){console.error('切换热身后绑定输入失败',e);} try{renderModuleMap(); updateKpis();}catch(e){console.error('切换热身后刷新失败',e);} saveState(); scrollToExerciseCard(newCard); showToast('已切换为：'+(tpl.name||'热身'));
+  var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var card=warmupActionTemplateSwitchTarget; if(!card||!document.body.contains(card)){applyWarmupActionTemplate(id);return;} var idx=Array.prototype.slice.call(document.querySelectorAll('#warmupExercises .warmCard')).indexOf(card); var tmp=document.createElement('div'); tmp.innerHTML=warmupTemplateToCardHTML(tpl,idx); var newCard=tmp.firstElementChild; card.parentNode.replaceChild(newCard,card); closeWarmupActionTemplateModal(); try{fillWarmupCardFromTemplate(newCard,tpl);}catch(e){console.error('切换热身后填充组数据失败',e);} try{bindTrainingDataInputs(document);}catch(e){console.error('切换热身后绑定输入失败',e);} try{renderModuleMap(); updateKpis();}catch(e){console.error('切换热身后刷新失败',e);} saveWarmupStructuralEdit(); scrollToExerciseCard(newCard); showToast('已切换为：'+(tpl.name||'热身'));
 }
 function editWarmupActionTemplateCategory(id){var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var cat=prompt('分类：足踝 / 髋 / 胸椎 / 肩胛 / 肩袖 / 核心 / 下肢 / 上肢 / 通用',tpl.category||inferWarmupCategory(tpl.name)); if(cat===null)return; tpl.category=(cat||inferWarmupCategory(tpl.name)).trim(); tpl.updatedAt=new Date().toISOString(); saveState(); renderWarmupActionTemplateList();}
 function renameWarmupActionTemplate(id){var tpl=ensureWarmupActionTemplates().find(function(t){return t.id===id;}); if(!tpl)return; var name=prompt('热身动作名称',tpl.name||''); if(name===null)return; tpl.name=(name||tpl.name).trim(); if(!tpl.category)tpl.category=inferWarmupCategory(tpl.name); tpl.updatedAt=new Date().toISOString(); dedupeTemplateLibraries(); saveState(); renderWarmupActionTemplateList(); refreshAllTemplateStatuses();}
@@ -2061,13 +2101,17 @@ function rebuild(){
   document.getElementById('restNotice').textContent = '组间规则：'+w['组间休息/规则'];
   renderStructuredWorkoutInfo(w);
   let purpose=workoutPurpose(w), warmKey=workoutWarmupKey();
-  var workoutCustomWarmup=state.customWarmups[warmKey]||'',warmupResolution=workoutCustomWarmup?{kind:'custom',text:workoutCustomWarmup,items:[]}:workoutWarmupResolution(w);
+  var hasCustomWarmup=Object.prototype.hasOwnProperty.call(state.customWarmups||{},warmKey);
+  var warmupResolution=hasCustomWarmup?{kind:'custom',text:state.customWarmups[warmKey]||'',items:[]}:workoutWarmupResolution(w);
+  resetWarmupEditState(warmupResolution.kind);
   var warmupSourceLabel={structured:'结构化计划热身',rest:'休息日恢复说明',custom:'自定义热身','legacy-template':'旧热身模板',none:'未设置热身'}[warmupResolution.kind]||'热身';
   document.getElementById('warmupPurpose').textContent = warmupSourceLabel+'｜自动分类：'+purpose+'｜可编辑成项目，支持每组独立计时。';
   document.getElementById('warmupInput').value = warmupResolution.text;
   document.getElementById('warmupBox').textContent = warmupResolution.text || '本日未设置热身';
   var warmupItems=warmupResolution.kind==='structured'?warmupResolution.items:((warmupResolution.kind==='rest'||warmupResolution.kind==='none')?[]:null);
-  parseAndRenderWarmups(false,warmupItems,warmupResolution.kind==='structured'?warmupResolution.groups:[]);
+  var warmDraft=state.currentWorkoutDrafts&&state.currentWorkoutDrafts[currentDraftKey()];
+  if(hasCustomWarmup&&warmDraft&&Array.isArray(warmDraft.warmups))renderCustomWarmupDraft(warmDraft);
+  else parseAndRenderWarmups(false,warmupItems,warmupResolution.kind==='structured'?warmupResolution.groups:[]);
   renderNoteInputs();
   renderCompleteDebugStatus();
   var mainRender=renderMainExerciseCards(w,exs);
@@ -2109,6 +2153,7 @@ function handleTrainingDataInput(ev){
     var row=ev.target.closest&&ev.target.closest('.setrow');
     var card=ev.target.closest&&ev.target.closest('.exercise');
     var field=ev.target.getAttribute('data-field');
+    if(field==='warmName'&&card&&card.classList.contains('warmCard')){saveWarmupStructuralEdit();updateKpis();return;}
     markRowFieldEdited(row,field);
     captureCurrentWorkoutDraft();
     if(card&&field==='mainName'){persistCurrentExerciseName(card,ev.target.value);refreshSupersetNames(card);}
@@ -2333,8 +2378,6 @@ function saveProgress(){
   syncFloatingNote();
   var draft=captureCurrentWorkoutDraft();
   if(typeof hasMeaningfulTrainingInput==='function'&&hasMeaningfulTrainingInput(draft))markCurrentTrainingToday({noSave:true});
-  var w=getWorkout(), key=workoutWarmupKey(), input=document.getElementById('warmupInput');
-  if(input) state.customWarmups[key]=input.value;
   saveState();
   alert('已保存当前输入和热身项目。存在真实训练输入时会同步实际训练日期。');
 }
