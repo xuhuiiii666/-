@@ -2412,7 +2412,13 @@ function renderTimerSelection(){
   });
 }
 function setTimer(sec){
-  sec=Math.max(0,Number(sec)||0); timerBase=sec;timerLeft=sec;renderTimer();renderTimerSelection();setTimerControlStatus('已选择 '+fmt(timerBase));
+  sec=Math.max(0,Number(sec)||0); timerBase=sec;
+  var runningGeneral=activeTimerContext&&activeTimerContext.type==='general';
+  if(runningGeneral) activeTimerContext.endAt=Date.now()+sec*1000;
+  // The shared display follows the active row timer; general presets must not retarget it.
+  if(!activeTimerContext||runningGeneral) timerLeft=sec;
+  renderTimer();renderTimerSelection();
+  setTimerControlStatus(runningGeneral?'计时中 · '+fmt(timerLeft):'已选择 '+fmt(timerBase)+(activeTimerContext?'（当前组休息或动作倒计时不变）':''));
 }
 function renderTimer(){var timer=document.getElementById('timer');if(timer)timer.textContent=fmt(timerLeft);}
 function tickRealTimer(){
