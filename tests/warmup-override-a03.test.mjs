@@ -31,7 +31,7 @@ test.before(async()=>{
   server=http.createServer((req,res)=>{
     const name=new URL(req.url,'http://localhost').pathname,file=path.join(directory,name==='/'?'index.html':name);
     if(!fs.existsSync(file)){res.writeHead(404);res.end();return;}
-    res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');fs.createReadStream(file).pipe(res);
+    res.setHeader('Content-Type',/\.m?js$/.test(file)?'text/javascript':file.endsWith('.css')?'text/css':'text/html');fs.createReadStream(file).pipe(res);
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));url='http://127.0.0.1:'+server.address().port+'/';
   browser=await webkit.launch({headless:true});
@@ -47,6 +47,7 @@ async function withPage(run,seed=fixture()){
     },seed);
     const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.dismiss());
     await page.goto(url,{waitUntil:'load'});
+    await page.waitForFunction(()=>window.trainingAppReady===true);
     const before=await page.evaluate(()=>JSON.stringify(getActiveProgram().days));
     await run(page);
     assert.deepEqual(errors,[]);
@@ -55,6 +56,7 @@ async function withPage(run,seed=fixture()){
   }finally{await context.close();}
 }
 const warmRow=page=>page.locator('#warmupExercises .setrow').first();
+async function reloadReady(page){await page.reload();await page.waitForFunction(()=>window.trainingAppReady===true);}
 async function grouped(page){
   assert.equal(await page.locator('.warmupDisplayGroup').count(),2);
   assert.deepEqual(await page.locator('.warmupDisplayGroup').evaluateAll(groups=>groups.map(g=>g.querySelectorAll('.warmupStageCard').length)),[3,3]);
@@ -69,36 +71,36 @@ test('A03-1 rebuild stays structured, two parents/three stages, no override or s
 test('A03-2 main-only 60kg x8 RIR2 save preserves grouped warmup through reload',()=>withPage(async p=>{
   const ids=await identities(p);const row=p.locator('#exercises .setrow').first();
   await row.locator('[data-field="weight"]').fill('60');await row.locator('[data-field="reps"]').fill('8');await row.locator('[data-field="rir"]').fill('2');
-  await p.evaluate(()=>saveProgress());await p.evaluate(()=>rebuild());await grouped(p);await p.reload();await grouped(p);
+  await p.evaluate(()=>saveProgress());await p.evaluate(()=>rebuild());await grouped(p);await reloadReady(p);await grouped(p);
   assert.equal(await p.locator('#exercises [data-field="weight"]').first().inputValue(),'60');assert.deepEqual(await identities(p),ids);
 }));
 test('A03-3 warmup actual weights restore by original IDs without structural override',()=>withPage(async p=>{
   const ids=await identities(p);await warmRow(p).locator('[data-field="weight"]').fill('20');
   await p.locator('#warmupExercises .setrow').nth(1).locator('[data-field="weight"]').fill('40');
-  await p.evaluate(()=>saveProgress());await p.reload();await grouped(p);
+  await p.evaluate(()=>saveProgress());await reloadReady(p);await grouped(p);
   assert.equal(await warmRow(p).locator('[data-field="weight"]').inputValue(),'20');assert.equal(await p.locator('#warmupExercises .setrow').nth(1).locator('[data-field="weight"]').inputValue(),'40');assert.deepEqual(await identities(p),ids);
 }));
 test('A03-4 warmup reps/RIR/duration/rest remain execution draft fields',()=>withPage(async p=>{
   for(const [field,value]of [['reps','9'],['rir','3'],['duration','25']])await warmRow(p).locator('[data-field="'+field+'"]').fill(value);
   await warmRow(p).locator('input[type=range]').evaluate(el=>{el.value='45';el.dispatchEvent(new Event('input',{bubbles:true}));});
-  await p.evaluate(()=>saveProgress());await p.reload();await grouped(p);
+  await p.evaluate(()=>saveProgress());await reloadReady(p);await grouped(p);
   for(const [field,value]of [['reps','9'],['rir','3'],['duration','25']])assert.equal(await warmRow(p).locator('[data-field="'+field+'"]').inputValue(),value);
   assert.equal(await warmRow(p).locator('input[type=range]').inputValue(),'45');
 }));
 test('A03-5 add/rename a warmup creates only a workout override and reload preserves IDs',()=>withPage(async p=>{
   await p.evaluate(()=>addWarmupProject());await p.locator('#warmupExercises .warmCard').last().locator('[data-field="warmName"]').fill('肩胛俯卧撑');
   const ids=await identities(p);assert.equal(ids.length,7);assert.equal(await p.evaluate(()=>warmupEditState.sourceKind),'custom');
-  await p.reload();assert.equal(await p.locator('#warmupExercises .warmCard').count(),7);assert.deepEqual(await identities(p),ids);
+  await reloadReady(p);assert.equal(await p.locator('#warmupExercises .warmCard').count(),7);assert.deepEqual(await identities(p),ids);
   assert.equal(await p.locator('#warmupExercises .warmCard').last().locator('[data-field="warmName"]').inputValue(),'肩胛俯卧撑');
 }));
 test('A03-6 deletion survives save and reload without restoring removed canonical stage',()=>withPage(async p=>{
   const ids=await identities(p);await p.evaluate(()=>removeWarmupProject({closest:()=>document.querySelector('#warmupExercises .warmCard')}));
-  await p.evaluate(()=>saveProgress());await p.reload();assert.deepEqual(await identities(p),ids.slice(1));assert.equal(await p.evaluate(()=>warmupEditState.sourceKind),'custom');
+  await p.evaluate(()=>saveProgress());await reloadReady(p);assert.deepEqual(await identities(p),ids.slice(1));assert.equal(await p.evaluate(()=>warmupEditState.sourceKind),'custom');
 }));
 test('A03-7 restore default removes override and restores original groups/IDs',()=>withPage(async p=>{
   const ids=await identities(p);await warmRow(p).locator('[data-field="weight"]').fill('20');
   await p.evaluate(()=>addWarmupProject());assert.equal(await p.evaluate(()=>Object.hasOwn(state.customWarmups,workoutWarmupKey())),true);
-  await p.evaluate(()=>loadDefaultWarmup());await grouped(p);assert.deepEqual(await identities(p),ids);await p.reload();await grouped(p);
+  await p.evaluate(()=>loadDefaultWarmup());await grouped(p);assert.deepEqual(await identities(p),ids);await reloadReady(p);await grouped(p);
   assert.equal(await warmRow(p).locator('[data-field="weight"]').inputValue(),'20');
 }));
 test('A03-8 D1 override never changes D5 or creates a purpose-level template',()=>withPage(async p=>{
@@ -121,17 +123,17 @@ test('A03-12 unsaved dirty owner cannot cross Workout boundary',()=>withPage(asy
   assert.equal(await p.evaluate(()=>commitWarmupStructureEdit(true)),false);
 }));
 test('A03-13 actual textarea edit and explicit empty override survive reload',()=>withPage(async p=>{
-  await p.locator('#warmupInput').fill('肩胛俯卧撑 1x10 休息30秒');await p.reload();assert.equal(await p.evaluate(()=>warmupEditState.sourceKind),'custom');
-  await p.locator('#warmupInput').fill('');await p.reload();assert.equal(await p.locator('#warmupExercises .warmCard').count(),0);assert.equal(await p.evaluate(()=>Object.hasOwn(state.customWarmups,workoutWarmupKey())),true);
+  await p.locator('#warmupInput').fill('肩胛俯卧撑 1x10 休息30秒');await reloadReady(p);assert.equal(await p.evaluate(()=>warmupEditState.sourceKind),'custom');
+  await p.locator('#warmupInput').fill('');await reloadReady(p);assert.equal(await p.locator('#warmupExercises .warmCard').count(),0);assert.equal(await p.evaluate(()=>Object.hasOwn(state.customWarmups,workoutWarmupKey())),true);
   await p.evaluate(()=>loadDefaultWarmup());await grouped(p);
 }));
 test('A03-14 add/copy/delete sets preserve surviving IDs and independent inputs',()=>withPage(async p=>{
   await p.evaluate(()=>addWarmupProject());const last=p.locator('#warmupExercises .warmCard').last();
   await last.locator('[data-field="weight"]').fill('15');await last.locator('[onclick="duplicateWarmupSet(this)"]').tap();
-  let ids=await identities(p);assert.equal(new Set(ids.at(-1).sets).size,2);await p.reload();assert.deepEqual(await identities(p),ids);
+  let ids=await identities(p);assert.equal(new Set(ids.at(-1).sets).size,2);await reloadReady(p);assert.deepEqual(await identities(p),ids);
   assert.equal(await last.locator('[data-field="weight"]').last().inputValue(),'15');
   await p.evaluate(()=>{const card=[...document.querySelectorAll('#warmupExercises .warmCard')].at(-1);removeWarmupSet({closest:()=>card.querySelector('.setrow')});});
-  ids=await identities(p);await p.reload();assert.deepEqual(await identities(p),ids);
+  ids=await identities(p);await reloadReady(p);assert.deepEqual(await identities(p),ids);
 }));
 test('A03-15 Preview five times leaves ROOT/dates/overrides/dirty unchanged',()=>withPage(async p=>{
   const snapshot=()=>p.evaluate(()=>({root:localStorage.getItem('training-tracker-state'),state:JSON.stringify(trainingTrackerState),dirty:JSON.stringify(warmupEditState),writes:__writes}));
@@ -144,7 +146,7 @@ test('A03-16 generic sync/log-draft/Finish do not create structured overrides',(
 }));
 test('A03-17 existing override is respected without automatic migration or deletion',async()=>{
   const seed=fixture();seed.profiles.PF.programs.P1.customWarmups['workout_P1-D1']='旧自定义动作 2x10 休息30秒';
-  await withPage(async p=>{assert.equal(await p.evaluate(()=>warmupEditState.sourceKind),'custom');assert.equal(await p.locator('#warmupExercises .warmCard').count(),1);assert.equal(await p.evaluate(()=>__writes),0);await p.evaluate(()=>saveProgress());await p.reload();assert.equal(await p.evaluate(()=>state.customWarmups[workoutWarmupKey()]),'旧自定义动作 2x10 休息30秒');},seed);
+  await withPage(async p=>{assert.equal(await p.evaluate(()=>warmupEditState.sourceKind),'custom');assert.equal(await p.locator('#warmupExercises .warmCard').count(),1);assert.equal(await p.evaluate(()=>__writes),0);await p.evaluate(()=>saveProgress());await reloadReady(p);assert.equal(await p.evaluate(()=>state.customWarmups[workoutWarmupKey()]),'旧自定义动作 2x10 休息30秒');},seed);
 });
 test('A03-18 explicit library template save/apply keeps purpose and workout semantics',()=>withPage(async p=>{
   await p.evaluate(()=>{openSaveTemplateModal();confirmSaveTemplate();});
@@ -153,13 +155,13 @@ test('A03-18 explicit library template save/apply keeps purpose and workout sema
   await p.evaluate(()=>nextWorkout());await grouped(p);
   await p.evaluate(id=>applyWarmupTemplate(id),id);
   assert.equal(await p.evaluate(()=>warmupEditState.sourceKind),'custom');
-  const ids=await identities(p);await p.reload();assert.deepEqual(await identities(p),ids);
+  const ids=await identities(p);await reloadReady(p);assert.deepEqual(await identities(p),ids);
 }));
 test('A03-19 adding a set to a structured stage retains original stage/set identities',()=>withPage(async p=>{
   const before=await identities(p);
   await p.evaluate(()=>addWarmupSet({closest:()=>document.querySelector('#warmupExercises .warmCard')}));
   const edited=await identities(p);assert.equal(edited[0].id,before[0].id);assert.equal(edited[0].sets[0],before[0].sets[0]);assert.equal(edited[0].sets.length,2);
   assert.equal(new Set(edited.flatMap(item=>item.sets)).size,7);
-  await p.reload();assert.deepEqual(await identities(p),edited);
+  await reloadReady(p);assert.deepEqual(await identities(p),edited);
   await p.evaluate(()=>loadDefaultWarmup());await grouped(p);assert.deepEqual(await identities(p),before);
 }));

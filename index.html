@@ -4,10 +4,21 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>逐日训练器｜12周计划</title>
-<script>window.APP_BUILD_VERSION='20260911-timer-preset-a05';</script>
-<link rel="stylesheet" href="style.css?v=20260911-timer-preset-a05"/>
+<script>window.APP_BUILD_VERSION='20261006-nutrition-local-1';</script>
+<link rel="stylesheet" href="style.css?v=20261006-nutrition-local-1"/>
+<link rel="stylesheet" href="nutrition.css?v=20261006-nutrition-local-1"/>
 </head>
 <body>
+<div id="storageShell">
+  <div id="storageBusy" role="status">正在读取训练记录…</div>
+  <div id="storageSaveStatus" role="status" aria-live="polite" hidden></div>
+  <div id="storageRecovery" hidden>
+    <button type="button" id="retryStorage" onclick="retryTrainingStorage()">重试保存</button>
+    <button type="button" onclick="exportUnsavedTrainingState()">导出未保存页面数据</button>
+    <button type="button" onclick="exportIndexedTrainingState()">导出数据库存档</button>
+    <button type="button" onclick="exportLegacyRootSnapshot()">导出旧版原始存档</button>
+  </div>
+</div>
 <header class="appHeader">
   <div class="brandLockup">
     <span class="brandMark">逐日</span>
@@ -26,6 +37,7 @@
     <option value="settings">参数设置</option>
     <option value="rmcalc">RM换算</option>
     <option value="importer">导入适配</option>
+    <option value="nutrition">饮食与身体</option>
   </select>
   <button type="button" id="mobileTabGo" class="mobileTabGo" onclick="forceMobileNav()">进入所选页面</button>
   <div class="tabs" id="topTabs">
@@ -35,6 +47,7 @@
     <button type="button" class="tab" data-tab="settings" onclick="showTab('settings')">参数设置</button>
     <button type="button" class="tab" data-tab="rmcalc" onclick="showTab('rmcalc')">RM换算</button>
     <button type="button" class="tab" data-tab="importer" onclick="showTab('importer')">导入适配</button>
+    <button type="button" class="tab" data-tab="nutrition" onclick="showTab('nutrition')">饮食与身体</button>
   </div>
 
   <section id="today" class="grid">
@@ -189,6 +202,9 @@
       <p class="small">如果前几天没练，不需要改日期；训练器以“未完成的下一练”为准，完成一次才推进一次。想强行换成推/拉/腿，可以在今日训练按上一练/下一练，或改当前训练序号。</p>
       <button class="primary" onclick="saveSettings()">保存设置</button>
       <div class="maintenanceRecovery">
+        <p id="storageMode" class="small"></p>
+        <button type="button" id="activateStorage" onclick="activateNewTrainingStorage()">备份并切换到本机数据库</button>
+        <button type="button" onclick="exportLegacyRootSnapshot()">导出切换前旧存档</button>
         <div id="storageDiagnostic" class="small">正在读取本地存储诊断，不会修改任何数据。</div>
         <div class="row" style="margin-top:8px">
           <button type="button" onclick="exportRawStateFromSettings()">导出原始本地存档</button>
@@ -273,6 +289,7 @@
     </div>
   </section>
 
+  <section id="nutrition" class="hidden" aria-label="饮食与身体"></section>
 </div>
 <nav class="mobileDock" aria-label="主导航">
   <button type="button" class="tab mobileDockItem isOn" data-tab="today" onclick="showTab('today')"><span>今日</span></button>
@@ -281,6 +298,7 @@
   <button type="button" class="tab mobileDockItem" data-tab="settings" onclick="showTab('settings')"><span>设置</span></button>
   <button type="button" class="tab mobileDockItem" data-tab="rmcalc" onclick="showTab('rmcalc')"><span>RM</span></button>
   <button type="button" class="tab mobileDockItem" data-tab="importer" onclick="showTab('importer')"><span>导入</span></button>
+  <button type="button" class="tab mobileDockItem" data-tab="nutrition" onclick="showTab('nutrition')"><span>饮食</span></button>
 </nav>
 
 <div id="saveTemplateModal" class="modalMask">
@@ -403,22 +421,23 @@
   </div>
 </div>
 <div id="timerConfirmMask" class="timerConfirmMask"><div class="timerConfirmBox"><h3 id="timerConfirmTitle">倒计时结束</h3><p id="timerConfirmBody">可以开始下一步。</p><button type="button" onclick="closeTimerConfirm()">确认</button></div></div>
-<script src="prescription.js?v=20260911-timer-preset-a05"></script>
-<script src="date-integrity.js?v=20260911-timer-preset-a05"></script>
-<script src="execution-reconciler.js?v=20260911-timer-preset-a05"></script>
-<script src="storage.js?v=20260911-timer-preset-a05"></script>
-<script src="templates.js?v=20260911-timer-preset-a05"></script>
-<script src="parser.js?v=20260911-timer-preset-a05"></script>
-<script src="workout-view.js?v=20260911-timer-preset-a05"></script>
-<script src="history.js?v=20260911-timer-preset-a05"></script>
-<script src="section-parser.js?v=20260911-timer-preset-a05"></script>
-<script src="long-form-daily-adapter.js?v=20260911-timer-preset-a05"></script>
-<script src="planner-import-v2.js?v=20260911-timer-preset-a05"></script>
-<script src="import-validator.js?v=20260911-timer-preset-a05"></script>
-<script src="plan-compiler.js?v=20260911-timer-preset-a05"></script>
-<script src="importer.js?v=20260911-timer-preset-a05"></script>
-<script src="program-store.js?v=20260911-timer-preset-a05"></script>
-<script src="app.js?v=20260911-timer-preset-a05"></script>
-<script>document.getElementById('appBuildVersion').textContent=window.APP_BUILD_VERSION||'unknown';</script>
+<script src="prescription.js?v=20261006-nutrition-local-1"></script>
+<script src="date-integrity.js?v=20261006-nutrition-local-1"></script>
+<script src="execution-reconciler.js?v=20261006-nutrition-local-1"></script>
+<script src="nutrition-model.js?v=20261006-nutrition-local-1"></script>
+<script src="storage.js?v=20261006-nutrition-local-1"></script>
+<script src="templates.js?v=20261006-nutrition-local-1"></script>
+<script src="parser.js?v=20261006-nutrition-local-1"></script>
+<script src="workout-view.js?v=20261006-nutrition-local-1"></script>
+<script src="history.js?v=20261006-nutrition-local-1"></script>
+<script src="section-parser.js?v=20261006-nutrition-local-1"></script>
+<script src="long-form-daily-adapter.js?v=20261006-nutrition-local-1"></script>
+<script src="planner-import-v2.js?v=20261006-nutrition-local-1"></script>
+<script src="import-validator.js?v=20261006-nutrition-local-1"></script>
+<script src="plan-compiler.js?v=20261006-nutrition-local-1"></script>
+<script src="importer.js?v=20261006-nutrition-local-1"></script>
+<script src="program-store.js?v=20261006-nutrition-local-1"></script>
+<script src="nutrition-view.js?v=20261006-nutrition-local-1"></script>
+<script type="module" src="storage-v2/bootstrap.mjs?v=20261006-nutrition-local-1"></script>
 </body>
 </html>

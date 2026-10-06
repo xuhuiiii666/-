@@ -1,0 +1,27 @@
+:root {color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;color:#242626;background:#f6f7f6;font-size:16px;letter-spacing:0}
+* {box-sizing:border-box}
+body {margin:0}
+main {max-width:840px;margin:auto;padding:28px 20px 64px}
+h1 {font-size:26px;font-weight:600;margin:10px 0 14px}
+h2 {font-size:19px;font-weight:600;margin:0 0 18px}
+p {line-height:1.6;overflow-wrap:anywhere}
+header {padding-bottom:24px}
+.eyebrow,.muted {color:#6a7171;font-size:15px}
+section {padding:26px 0;border-top:1px solid #dfe4e3}
+.actions {display:flex;flex-wrap:wrap;gap:10px}
+button,.file-control {font:inherit;font-size:15px;font-weight:500;min-height:46px;border-radius:8px;padding:10px 14px;border:1px solid #cbd3d1;color:#242626;background:white;cursor:pointer;line-height:1.4}
+button.primary {background:#17654e;color:white;border-color:#17654e}
+button:disabled {opacity:.45;cursor:default}
+button:focus-visible,.file-control:focus-within {outline:3px solid #b2d2ff;outline-offset:2px}
+button:active:not(:disabled) {opacity:.8}
+.file-control {position:relative;display:inline-flex;align-items:center;overflow:hidden}
+.file-control input {position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}
+.inventory {display:grid;grid-template-columns:1fr auto;gap:10px 24px;font-size:15px;margin:18px 0}
+.inventory:empty {display:none}
+.inventory dt {color:#596261}
+.inventory dd {margin:0;font-variant-numeric:tabular-nums;font-weight:600;text-align:right}
+.fingerprint {overflow-wrap:anywhere;color:#6a7171;font-size:13px}
+#status {border-left:3px solid #a8b2ae;padding:10px 14px;background:#fff;margin-top:20px}
+#status[data-state="success"] {border-color:#238257}
+#status[data-state="error"] {border-color:#c74032;color:#9d2822}
+@media(max-width:440px) {main {padding:24px 16px 48px}.actions>* {flex:1 1 150px}h1 {font-size:24px}}

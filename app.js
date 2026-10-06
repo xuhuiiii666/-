@@ -124,7 +124,7 @@ function scheduleWarmupTemplateSearch(){
 }
 
 function showTab(id){
-  var pages=['today','calendar','history','settings','rmcalc','importer'];
+  var pages=['today','calendar','history','settings','rmcalc','importer','nutrition'];
   for(var i=0;i<pages.length;i++){
     var el=document.getElementById(pages[i]);
     if(el){ el.classList.toggle('hidden', pages[i]!==id); }
@@ -140,6 +140,7 @@ function showTab(id){
   if(id==='calendar'){ renderCalendar(); setTimeout(function(){ scrollCalendarToCurrent(); },80); }
   if(id==='history')renderHistory();
   if(id==='settings')renderSettings();
+  if(id==='nutrition'&&typeof renderNutrition==='function')renderNutrition();
 }
 function exerciseEntityForRender(entity,index){
   var sets=Array.isArray(entity.sets)?entity.sets:[];
@@ -756,7 +757,7 @@ function saveWarmupTemplate(){
   let w=getWorkout(), purpose=workoutPurpose(w), txt=document.getElementById('warmupInput').value.trim();
   if(!txt){alert('先输入热身/退阶动作。');return;}
   state.customWarmups[purpose]=txt; state.customWarmups[workoutWarmupKey()]=txt; captureCurrentWorkoutDraft();resetWarmupEditState('custom');saveState();
-  alert('已保存为「'+purpose+'」热身/退阶模板。以后同类训练会优先调用。');
+  notifyTrainingSaved('已保存为「'+purpose+'」热身/退阶模板。以后同类训练会优先调用。');
 }
 function parseWarmupItems(text){
   return (text||'').split('\n').map(x=>x.trim()).filter(Boolean).map((line,i)=>{
@@ -1006,7 +1007,7 @@ function confirmSaveTemplate(){
   state.customWarmups[workoutWarmupKey()]=tpl.text;
   captureCurrentWorkoutDraft();resetWarmupEditState('custom');
   saveState(); closeTemplateModals();
-  alert('已保存模板：'+name+'。以后可以点“调用热身模板”选择。');
+  notifyTrainingSaved('已保存模板：'+name+'。以后可以点“调用热身模板”选择。');
 }
 function openTemplatePicker(){
   ensureWarmupTemplates();
@@ -1694,7 +1695,7 @@ function saveMainCardAsTemplate(btn){
     saveState();
     refreshMainCardTemplateStatus(card);
     renderExerciseTemplateList();
-    alert('动作已在动作库，已更新该模板结构，未重复新增。');
+    notifyTrainingSaved('动作已在动作库，已更新该模板结构，未重复新增。');
     return;
   }
   var name=prompt('保存为训练动作模板。模板名称，也是以后追踪上次重量的动作名：', current);
@@ -1707,7 +1708,7 @@ function saveMainCardAsTemplate(btn){
     saveState();
     refreshMainCardTemplateStatus(card);
     renderExerciseTemplateList();
-    alert('动作已在动作库，已更新该模板结构，未重复新增。');
+    notifyTrainingSaved('动作已在动作库，已更新该模板结构，未重复新增。');
     return;
   }
   var tpl=makeExerciseTemplateFromCard(card,name);
@@ -1718,7 +1719,7 @@ function saveMainCardAsTemplate(btn){
   saveState();
   refreshMainCardTemplateStatus(card);
   renderExerciseTemplateList();
-  alert('已保存训练动作模板：'+name+'。以后可在“调用训练动作模板”里选择。');
+  notifyTrainingSaved('已保存训练动作模板：'+name+'。以后可在“调用训练动作模板”里选择。');
 }
 function saveAllMainCardsAsTemplates(){
   var cards=Array.prototype.slice.call(document.querySelectorAll('#exercises .mainCard'));
@@ -1734,7 +1735,7 @@ function saveAllMainCardsAsTemplates(){
   dedupeTemplateLibraries();
   saveState();
   refreshAllTemplateStatuses();
-  alert('已保存 '+cards.length+' 个训练动作模板。');
+  notifyTrainingSaved('已保存 '+cards.length+' 个训练动作模板。');
 }
 
 var exerciseTemplateSwitchTarget = null;
@@ -1888,7 +1889,7 @@ function saveWarmupCardAsActionTemplate(btn){
     saveState();
     refreshWarmupCardTemplateStatus(card);
     renderWarmupActionTemplateList();
-    alert('热身动作已在热身库，已更新该模板结构，未重复新增。');
+    notifyTrainingSaved('热身动作已在热身库，已更新该模板结构，未重复新增。');
     return;
   }
   var name=prompt('保存为热身动作模板：', current); if(name===null) return;
@@ -1899,12 +1900,12 @@ function saveWarmupCardAsActionTemplate(btn){
     saveState();
     refreshWarmupCardTemplateStatus(card);
     renderWarmupActionTemplateList();
-    alert('热身动作已在热身库，已更新该模板结构，未重复新增。');
+    notifyTrainingSaved('热身动作已在热身库，已更新该模板结构，未重复新增。');
     return;
   }
   var tpl=makeWarmupActionTemplateFromCard(card,(name||current));
   var cat=prompt('选择分类：足踝 / 髋 / 胸椎 / 肩胛 / 肩袖 / 核心 / 下肢 / 上肢 / 通用', tpl.category); if(cat!==null&&cat.trim()) tpl.category=cat.trim();
-  ensureWarmupActionTemplates().push(tpl); dedupeTemplateLibraries(); saveState(); refreshWarmupCardTemplateStatus(card); renderWarmupActionTemplateList(); alert('已保存热身动作模板：'+tpl.name);
+  ensureWarmupActionTemplates().push(tpl); dedupeTemplateLibraries(); saveState(); refreshWarmupCardTemplateStatus(card); renderWarmupActionTemplateList(); notifyTrainingSaved('已保存热身动作模板：'+tpl.name);
 }
 var warmupActionTemplateSwitchTarget=null;
 function openWarmupActionTemplateSwitcher(btn){ warmupActionTemplateSwitchTarget=btn&&btn.closest?btn.closest('.warmCard'):null; renderWarmupActionTemplateList(); var m=document.getElementById('warmupActionTemplateModal'); if(m)m.classList.add('show'); }
@@ -2286,7 +2287,7 @@ function keepFloatingNoteForNext(){
   syncFloatingNote();
   state.keepNoteForNext=true;
   saveState();
-  alert('已设置：这条本次训练记录会保留到下一练。');
+  notifyTrainingSaved('已设置：这条本次训练记录会保留到下一练。');
 }
 function clearFloatingNoteDraft(){
   if(!confirm('确认清空当前浮动记录？已完成训练里的历史归档不会删除。')) return;
@@ -2378,10 +2379,10 @@ function saveProgress(){
   syncFloatingNote();
   var draft=captureCurrentWorkoutDraft();
   if(typeof hasMeaningfulTrainingInput==='function'&&hasMeaningfulTrainingInput(draft))markCurrentTrainingToday({noSave:true});
-  saveState();
-  alert('已保存当前输入和热身项目。存在真实训练输入时会同步实际训练日期。');
+  return afterTrainingCommit(saveState(),function(){alert('已保存当前输入和热身项目。存在真实训练输入时会同步实际训练日期。');});
 }
 function finishWorkout(){
+  if(window.trainingStorageBackend)return finishWorkoutCompleteBackup();
   markCurrentTrainingToday({noSave:true});
   captureCurrentWorkoutDraft();
   var completedIndex=state.currentIndex;
@@ -2398,9 +2399,9 @@ function finishWorkout(){
   if(!state.keepNoteForNext) setCurrentSessionNote('',{noSave:true});
   state.keepNoteForNext=false; saveState(); rebuild(); alert('已完成，并推进到下一练。');
 }
-function skipWorkout(){ setCurrentSessionNote('',{noSave:true}); saveState(); alert('已顺延：当前训练不会推进，下一次打开仍是这一练。');}
-function prevWorkout(){state.currentIndex=Math.max(0,state.currentIndex-1);saveState();rebuild();}
-function nextWorkout(){state.currentIndex=Math.min(PLAN.length-1,state.currentIndex+1);saveState();rebuild();}
+function skipWorkout(){ setCurrentSessionNote('',{noSave:true});return afterTrainingCommit(saveState(),function(){alert('已顺延：当前训练不会推进，下一次打开仍是这一练。');});}
+function prevWorkout(){state.currentIndex=Math.max(0,state.currentIndex-1);return afterTrainingCommit(saveState(),function(){rebuild();});}
+function nextWorkout(){state.currentIndex=Math.min(PLAN.length-1,state.currentIndex+1);return afterTrainingCommit(saveState(),function(){rebuild();});}
 function doneSet(id,rest){startRowTimer(id,rest);}
 function setTimerControlStatus(message){
   var status=document.getElementById('timerControlStatus');
@@ -2764,9 +2765,7 @@ function bindCalendarTapHandlers(){
 function enterSelectedTraining(){
   var i=(state.selectedCalendarIndex===undefined?state.currentIndex:state.selectedCalendarIndex);
   state.currentIndex=Math.max(0,Math.min(PLAN.length-1,Number(i)||0));
-  saveState();
-  showTab('today');
-  rebuild();
+  return afterTrainingCommit(saveState(),function(){showTab('today');rebuild();});
 }
 function moveSelectedTraining(delta){
   delta=Number(delta)||0;
@@ -2804,7 +2803,7 @@ function outdoorNoTrainingToday(){
   setCurrentSessionNote((getCurrentSessionNote()||'')+'\n[日期顺推] 今日外出无训练，训练内容保留到下一训练日。',{noSave:true});
   saveState();
   rebuild();
-  alert('已顺推一天：训练序号不变，当前训练保留到 '+next+'。');
+  notifyTrainingSaved('已顺推一天：训练序号不变，当前训练保留到 '+next+'。');
 }
 function renderProgramSwitcher(){
   var select=document.getElementById('programSwitcher');if(!select)return;
@@ -2824,11 +2823,15 @@ function renderHistoryFilter(){
   if(Array.prototype.some.call(select.options,function(option){return option.value===historyFilterValue;}))select.value=historyFilterValue;else{historyFilterValue='all';select.value='all';}
 }
 function switchProgramFromSelect(programId){
+  function renderSwitched(){state=getActiveProgram();PLAN=state.days;WARMUPS=trainingTrackerState.builtinWarmups||BUILTIN_WARMUPS;rebuild();renderCalendar();renderHistory();showToast('已切换训练计划：'+state.name);}
   try{
     if(typeof syncCurrentWorkoutFormToState==='function'&&document.getElementById('exercises')) syncCurrentWorkoutFormToState();
-    activateProgram(programId);
-    state=getActiveProgram();PLAN=state.days;WARMUPS=trainingTrackerState.builtinWarmups||BUILTIN_WARMUPS;
-    rebuild();renderCalendar();renderHistory();showToast('已切换训练计划：'+state.name);
+    var saved=activateProgram(programId);
+    if(saved&&typeof saved.then==='function'){
+      setStorageOperationBusy(true);
+      return saved.then(renderSwitched).catch(function(error){reportStorageActionError(error);renderProgramSwitcher();}).finally(function(){setStorageOperationBusy(false);});
+    }
+    renderSwitched();
   }catch(error){console.error('切换训练计划失败',error);alert('切换训练计划失败：'+(error.message||error));renderProgramSwitcher();}
 }
 function createCustomWorkoutFromInput(){
@@ -2838,7 +2841,7 @@ function createCustomWorkoutFromInput(){
     var workout=createCustomWorkout(title,{activate:false});
     state.selectedCalendarIndex=PLAN.findIndex(function(day){return day.workoutId===workout.workoutId;});
     if(input)input.value='';
-    saveState();renderCalendar();showToast('已新建并保存：'+workout.title);
+    return afterTrainingCommit(saveState(),function(){renderCalendar();showToast('已新建并保存：'+workout.title);});
   }catch(error){console.error('新建训练失败',error);alert('新建训练失败：'+(error.message||error));}
 }
 function renderCalendar(){
@@ -2960,12 +2963,14 @@ function executeDateStateRepair(){
     var afterProgram=profile.programs[root.activeProgramId];
     if(beforeHash!==hashWorkoutLogs(afterProgram.workoutLogs||[])||beforeWeighted!==countWeightedWorkoutLogEntries(afterProgram.workoutLogs||[]))throw new StateIntegrityError('安全对账校验失败：历史日志或重量发生变化。');
     if(beforeProfile.exerciseTemplates!==JSON.stringify(profile.exerciseTemplates||[])||beforeProfile.warmupTemplates!==JSON.stringify(profile.warmupTemplates||[])||beforeProfile.rmRecords!==JSON.stringify(profile.rmRecords||[])||beforeNotes!==JSON.stringify({currentSessionNote:afterProgram.currentSessionNote||'',noteArchive:afterProgram.noteArchive||[]}))throw new StateIntegrityError('安全对账校验失败：模板、RM 或备注发生变化。');
-    saveRootCandidate(root);
-    state=getActiveProgram();PLAN=state.days;state.exerciseHistory=buildExerciseHistoryFromLogs(state.workoutLogs||[]);
-    dateRepairPreview=null;rebuild();renderCalendar();renderHistory();renderSettings();showToast('安全日期修复已完成');
+    return afterTrainingCommit(saveRootCandidate(root),function(){
+      state=getActiveProgram();PLAN=state.days;state.exerciseHistory=buildExerciseHistoryFromLogs(state.workoutLogs||[]);
+      dateRepairPreview=null;rebuild();renderCalendar();renderHistory();renderSettings();showToast('安全日期修复已完成');
+    });
   }catch(error){console.error('执行日期修复失败',error);alert((typeof isStorageQuotaError==='function'&&isStorageQuotaError(error))?'存储空间不足，本次修改未保存。':'修复失败：'+(error.message||error));}
 }
 function renderSettings(){
+  if(typeof refreshStorageMode==='function')refreshStorageMode();
   document.getElementById('startDate').value=state.startDate||'';document.getElementById('currentIndex').value=state.currentIndex;document.getElementById('mainRest').value=state.settings.mainRest;document.getElementById('assistRest').value=state.settings.assistRest;
   var recovery=document.getElementById('preV6Recovery');if(recovery)recovery.classList.toggle('hidden',!(typeof hasPreV6Backup==='function'&&hasPreV6Backup()));renderStorageMaintenance();renderDateIntegrityMaintenance();
 }
@@ -2974,13 +2979,15 @@ function exportPreV6FromSettings(){try{exportRawPreV6Backup();showToast('已导�
 function exportLegacyKeyFromSettings(key){try{exportRawLegacyStorageKey(key);showToast('已导出 Legacy 原始数据');}catch(error){console.error('导出 Legacy 原始数据失败',error);alert('导出失败：'+(error.message||error));}}
 function deleteMigratedLegacyFromSettings(){try{var result=deleteMigratedLegacyData();if(!result)return;renderSettings();showToast(result.deleted?('已删除 Legacy 数据，释放 '+formatStorageBytes(result.releasedBytes)):'没有可删除的 Legacy 数据');}catch(error){console.error('删除 Legacy 数据失败',error);alert('删除失败：'+(error.message||error));}}
 function deletePreV6FromSettings(){try{if(deletePreV6Backup()){renderSettings();showToast('已删除本机升级前快照');}}catch(error){console.error('删除升级前备份失败',error);alert('删除失败：'+(error.message||error));}}
-function saveSettings(){state.startDate=document.getElementById('startDate').value;state.currentIndex=parseInt(document.getElementById('currentIndex').value)||0;state.settings.mainRest=parseInt(document.getElementById('mainRest').value)||180;state.settings.assistRest=parseInt(document.getElementById('assistRest').value)||90;saveState();rebuild();alert('设置已保存。');}
+function saveSettings(){state.startDate=document.getElementById('startDate').value;state.currentIndex=parseInt(document.getElementById('currentIndex').value)||0;state.settings.mainRest=parseInt(document.getElementById('mainRest').value)||180;state.settings.assistRest=parseInt(document.getElementById('assistRest').value)||90;return afterTrainingCommit(saveState(),function(){rebuild();alert('设置已保存。');});}
 function restoreUpgradeBackupFromSettings(){
   try{
     var restored=restorePreV6Backup();if(!restored)return;
-    state=getActiveProgram();PLAN=state.days;WARMUPS=(state.warmupDefinitions&&state.warmupDefinitions.length)?state.warmupDefinitions:(trainingTrackerState.builtinWarmups||BUILTIN_WARMUPS);
-    rebuild();renderCalendar();renderHistory();renderSettings();
-    alert('已恢复升级前本地数据。安全快照仍保留在本机。');showTab('today');
+    return afterTrainingCommit(restored,function(){
+      state=getActiveProgram();PLAN=state.days;WARMUPS=(state.warmupDefinitions&&state.warmupDefinitions.length)?state.warmupDefinitions:(trainingTrackerState.builtinWarmups||BUILTIN_WARMUPS);
+      rebuild();renderCalendar();renderHistory();renderSettings();
+      alert('已恢复升级前本地数据。安全快照仍保留在本机。');showTab('today');
+    });
   }catch(error){console.error('恢复升级前数据失败',error);alert('恢复失败：'+(error.message||error));}
 }
 
@@ -3206,8 +3213,31 @@ function finishWorkoutCompleteBackup(){
     return;
   }
   var log=null,brief='',before=null,committed=false;
+  var pending=false;
   var dateInput=document.getElementById('actualDate'),dateInputBefore=dateInput&&dateInput.value;
   finish.running=true;
+  function release(){finish.running=false;if(pending&&typeof setStorageOperationBusy==='function')setStorageOperationBusy(false);}
+  function failed(error){
+    console.error('[complete] failed',error);
+    if(!committed&&before){bindTrainingRuntime(before);if(dateInput)dateInput.value=dateInputBefore;}
+    var message=error&&error.message?error.message:String(error);
+    try{setCompleteDebugStatus(committed?'成功':'失败',message);}catch(statusError){console.error('[complete] status render failed',statusError);}
+    alert((committed?'训练已保存，但页面刷新/显示失败，请刷新页面。\n':'完成训练保存失败，本次未完成，请重试。\n')+message);
+  }
+  function backupFailed(error){
+    console.error('备份导出失败',error);
+    try{setCompleteDebugStatus('成功','自动备份失败：'+(error.message||error));}catch(statusError){console.error('[complete] status render failed',statusError);}
+    alert('已完成今日训练，已进入下一练。\n但自动备份失败，请点击“手动导出周期备份”。');
+  }
+  function saved(){
+    committed=true;finish.lastCommit={intent:intent,at:Date.now(),refreshFailed:true};
+    showBrief(brief);rebuild();finish.lastCommit.refreshFailed=false;
+    showToast('已完成今日训练，已进入下一练');
+    try{
+      console.log('[complete] backup start');
+      return afterTrainingCommit(downloadCycleBackupFile(true,log),function(){showToast('已完成今日训练，已进入下一练。总存档已导出。');console.log('[complete] done');},backupFailed);
+    }catch(error){backupFailed(error);}
+  }
   try{
     before=JSON.parse(JSON.stringify(trainingTrackerState));
     if(hasIncompleteMainWorkoutRender())throw new Error('正式动作显示不完整，原草稿已保留，请刷新页面后再完成训练。');
@@ -3231,34 +3261,16 @@ function finishWorkoutCompleteBackup(){
     if(!state.keepNoteForNext) setCurrentSessionNote('',{noSave:true,noRender:true});
     state.keepNoteForNext=false;
     setCompleteDebugStatus('成功','',{noRender:true});
-    saveState();
-    committed=true;
-    finish.lastCommit={intent:intent,at:Date.now(),refreshFailed:true};
-    showBrief(brief);
-    rebuild();
-    finish.lastCommit.refreshFailed=false;
-    showToast('已完成今日训练，已进入下一练');
-    try{
-      console.log('[complete] backup start');
-      downloadCycleBackupFile(true,log);
-      showToast('已完成今日训练，已进入下一练。总存档已导出。');
-      console.log('[complete] done');
-    }catch(backupError){
-      console.error('备份导出失败',backupError);
-      try{setCompleteDebugStatus('成功','自动备份失败：'+(backupError&&backupError.message?backupError.message:backupError));}catch(statusError){console.error('[complete] status render failed',statusError);}
-      alert('已完成今日训练，已进入下一练。\n但自动备份失败，请点击“手动导出周期备份”。');
+    var write=saveState();
+    if(write&&typeof write.then==='function'){
+      pending=true;if(typeof setStorageOperationBusy==='function')setStorageOperationBusy(true);
+      return write.then(saved).catch(failed).finally(release);
     }
+    saved();
   }catch(error){
-    console.error('[complete] failed',error);
-    if(!committed&&before){
-      bindTrainingRuntime(before);
-      if(dateInput)dateInput.value=dateInputBefore;
-    }
-    var message=error&&error.message?error.message:String(error);
-    try{setCompleteDebugStatus(committed?'成功':'失败',message);}catch(statusError){console.error('[complete] status render failed',statusError);}
-    alert((committed?'训练已保存，但页面刷新/显示失败，请刷新页面。\n':'完成训练保存失败，本次未完成，请重试。\n')+message);
+    failed(error);
   }finally{
-    finish.running=false;
+    if(!pending)release();
   }
 }
 function currentMainWorkoutHasWeight(){
@@ -3291,19 +3303,19 @@ function moveCurrentTraining(delta){
   saveState();
   rebuild();
   if(!document.getElementById('calendar').classList.contains('hidden')) renderCalendar();
-  alert((delta<0?'已前移：':'已后推：') + before + '，与 ' + other + ' 交换位置。');
+  notifyTrainingSaved((delta<0?'已前移：':'已后推：') + before + '，与 ' + other + ' 交换位置。');
 }
 function promoteNextTrainingToToday(){
   var i=Math.max(0,Math.min(PLAN.length-1,state.currentIndex||0));
   if(i>=PLAN.length-1){ alert('后面没有下一练了。'); return; }
   var tmp=PLAN[i]; PLAN[i]=PLAN[i+1]; PLAN[i+1]=tmp;
   persistCurrentPlanOrder(); saveState(); rebuild(); renderCalendar();
-  alert('已把下一练提前到今天，原本今天这一练顺延到下一位。');
+  notifyTrainingSaved('已把下一练提前到今天，原本今天这一练顺延到下一位。');
 }
 (function(){
   var oldShowTab = window.showTab;
   window.showTab = function(id){
-    var pages=['today','calendar','history','settings','rmcalc','importer'];
+    var pages=['today','calendar','history','settings','rmcalc','importer','nutrition'];
     for(var i=0;i<pages.length;i++){
       var el=document.getElementById(pages[i]);
       if(el) el.classList.toggle('hidden', pages[i]!==id);
@@ -3319,6 +3331,7 @@ function promoteNextTrainingToToday(){
       if(id==='calendar')renderCalendar();
       if(id==='history')renderHistory();
       if(id==='settings')renderSettings();
+      if(id==='nutrition'&&typeof renderNutrition==='function')renderNutrition();
       try{ window.scrollTo({top:0,behavior:'auto'}); }catch(scrollError){ window.scrollTo(0,0); }
     }catch(e){ console.error(e); }
   };
@@ -3458,3 +3471,4 @@ function refreshCalendarAndFocus(delay){
 })();
 
 rebuild();showTab('today');initWorkoutUiPreferences();bindGeneralTimerControls();
+window.trainingAppInitialized=true;

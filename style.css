@@ -1373,3 +1373,10 @@ body{
   .structuredWorkoutMeta{display:block}
   .compoundSegmentHead{display:grid;gap:3px}
 }
+/* Persistence feedback is outside the disabled application during a commit. */
+#storageShell{position:sticky;top:0;z-index:100000;background:#17202b;color:#edf2f7;font-size:14px;overflow-wrap:anywhere}
+#storageShell [hidden]{display:none!important}
+#storageSaveStatus,#storageBusy{padding:8px 12px}
+#storageSaveStatus[data-error="true"]{background:#592f35}
+#storageRecovery{padding:8px 12px;display:flex;gap:8px;flex-wrap:wrap}
+#storageRecovery button{min-height:44px;max-width:100%;white-space:normal;font-size:14px}

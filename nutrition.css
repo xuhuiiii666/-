@@ -1,0 +1,57 @@
+#nutrition{max-width:880px;margin:0 auto;padding:12px 0 110px;font-size:15px;line-height:1.5;letter-spacing:0}
+#nutrition *{min-width:0;letter-spacing:0}
+#nutrition h2{font-size:22px;margin:0;font-weight:600}
+#nutrition h3{font-size:17px;margin:0;font-weight:600}
+#nutrition h4{font-size:16px;margin:0 0 12px}
+#nutrition input,#nutrition select,#nutrition button{min-height:44px!important;font-size:16px!important;border-radius:8px}
+#nutrition input,#nutrition select,#nutrition textarea{width:100%;max-width:100%;font-weight:400}
+#nutrition select{height:44px;appearance:none;-webkit-appearance:none;padding-right:28px}
+#nutrition label:has(>select){position:relative}
+#nutrition label:has(>select)::after{content:'⌄';position:absolute;right:10px;bottom:11px;pointer-events:none;color:var(--muted)}
+#nutrition textarea{min-height:76px;font-size:16px}
+#nutrition label{display:flex;flex-direction:column;gap:6px;font-size:15px;margin:8px 0;color:var(--muted)}
+#nutrition button{cursor:pointer;touch-action:manipulation;white-space:normal}
+#nutrition button:active{opacity:.8}
+#nutrition button:disabled{opacity:.4;cursor:default}
+#nutrition button:focus-visible,#nutrition summary:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.nutritionHeading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.nutritionDate{display:grid;grid-template-columns:44px minmax(140px,1fr) 44px;gap:6px;width:100%;max-width:310px}
+.nutritionDate button{font-size:24px!important;padding:0}
+.nutritionTabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin:16px 0}
+.nutritionTabs button{flex:1;border:0;background:transparent;border-bottom:3px solid transparent;border-radius:0!important}
+.nutritionTabs button[aria-selected="true"]{border-bottom-color:var(--ok);background:var(--card)}
+#nutritionStatus{min-height:24px;color:var(--ok);margin:8px 0;overflow-wrap:anywhere}
+#nutritionStatus:empty{display:none}
+#nutritionStatus.nutritionError{color:var(--bad)}
+.nutritionDayHead,.nutritionMeal header,.nutritionCycle header{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+.nutritionDayHead{margin:16px 0}
+.nutritionStats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px 0;border-block:1px solid var(--line)}
+.nutritionStats span,.nutritionStats small{display:block;color:var(--muted);font-size:13px}
+.nutritionStats strong{display:block;font-size:22px;font-weight:600;overflow-wrap:anywhere;margin-top:4px}
+.nutritionMacro{font-size:14px;color:var(--muted);margin:12px 0;line-height:1.7}
+.nutritionMuted,.nutritionDayHead small{color:var(--muted);font-size:14px}
+.nutritionActions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0}
+.nutritionActions details{flex:1}
+#nutrition summary{cursor:pointer;min-height:44px;padding:10px 0}
+.nutritionMeal,.nutritionCycle{border:1px solid var(--line);border-radius:8px;background:var(--card);padding:14px;margin:14px 0;overflow-wrap:anywhere}
+.nutritionBadge{font-size:13px;color:var(--muted)}
+.nutritionBadge.confirmed{color:var(--ok)}
+.nutritionBadge.estimated{color:#e6bd67}
+.nutritionFoodList{list-style:none;padding:0;margin:14px 0}
+.nutritionFoodList li{display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--line)}
+.nutritionFoodList b{font-weight:500;white-space:nowrap}
+.nutritionFoodList small{display:block;color:var(--muted);font-size:13px}
+.nutritionMetrics,.nutritionTraining{border-top:1px solid var(--line);padding:14px 0}
+.nutritionColumns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.nutritionFoodEditor{border:0;border-bottom:1px solid var(--line);padding:0 0 14px;margin:12px 0}
+.nutritionFoodHead{display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:8px;align-items:end}
+.nutritionFoodHead button{margin-bottom:8px;font-size:22px!important;color:var(--bad)}
+.nutritionMealEditor{border-top:1px solid var(--line);margin:20px 0;padding-top:16px}
+.nutritionEmpty{text-align:center;color:var(--muted);padding:48px 0}
+.nutritionReviewGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;border-bottom:1px solid var(--line)}
+.nutritionReviewGrid p{font-size:14px;color:var(--muted)}
+.nutritionReviewGrid b{display:block;font-size:18px;font-weight:600;color:var(--text)}
+.nutritionReviewGrid small{display:block;margin-top:6px}
+.nutritionWeekList button{display:grid;grid-template-columns:1.3fr 1fr 1fr;align-items:center;gap:8px;width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0!important;background:transparent;text-align:left;padding:12px 0}
+.nutritionWeekList small{display:block;font-size:13px;color:var(--muted)}
+@media(max-width:700px){.mobileDock{grid-template-columns:repeat(7,minmax(0,1fr))}body:has(#nutrition:not(.hidden)) .floatingNote{display:none}.nutritionHeading{gap:16px}.nutritionDate{max-width:none}.nutritionActions button{flex:1 1 auto}}

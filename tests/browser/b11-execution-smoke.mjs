@@ -27,7 +27,7 @@ const root={schemaVersion:6,activeProfileId:'PF',activeProgramId:program.program
 const server=http.createServer((req,res)=>{
   const name=new URL(req.url,'http://localhost').pathname,file=path.join(directory,name==='/'?'index.html':name);
   if(!fs.existsSync(file)||!fs.statSync(file).isFile()){res.writeHead(404);res.end();return;}
-  res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');fs.createReadStream(file).pipe(res);
+  res.setHeader('Content-Type',/\.m?js$/.test(file)?'text/javascript':file.endsWith('.css')?'text/css':'text/html');fs.createReadStream(file).pipe(res);
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const engine=process.env.BROWSER_ENGINE==='webkit'?webkit:chromium;
@@ -42,6 +42,7 @@ try{
   },root);
   const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.dismiss());
   await page.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'load'});
+  await page.waitForFunction(()=>window.trainingAppReady===true);
   const baseline=await page.evaluate(()=>({exercises:JSON.stringify(getWorkout().exercises),logs:JSON.stringify(state.workoutLogs),dates:JSON.stringify(state.actualDates),fingerprint:programContentFingerprint(getActiveProgram()).hash}));
   const group=page.locator('#exercises > .supersetCard');
   assert.equal(await group.count(),1);
@@ -180,6 +181,7 @@ try{
   await tc.addInitScript(root=>{localStorage.setItem('training-tracker-state',JSON.stringify(root));window.__intervals=new Set();const set=window.setInterval,clear=window.clearInterval;window.setInterval=(...args)=>{const id=set(...args);__intervals.add(id);return id;};window.clearInterval=id=>{__intervals.delete(id);clear(id);};},timerRoot);
   const tp=await tc.newPage(),timerErrors=[];tp.on('pageerror',e=>timerErrors.push(e.message));tp.on('dialog',d=>d.dismiss());
   await tp.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'load'});
+  await tp.waitForFunction(()=>window.trainingAppReady===true);
   const timerBefore=await tp.evaluate(()=>({exercises:JSON.stringify(getWorkout().exercises),logs:JSON.stringify(state.workoutLogs),index:state.currentIndex}));
   const report={};
   for(const [kind,selector,seconds] of [['warmup','#warmupExercises .setrow',30],['main','#exercises .setrow',180]]){

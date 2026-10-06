@@ -23,7 +23,7 @@ test.before(async()=>{
   server=http.createServer((req,res)=>{
     const name=new URL(req.url,'http://localhost').pathname,file=path.join(directory,name==='/'?'index.html':name);
     if(!fs.existsSync(file)){res.writeHead(404);res.end();return;}
-    res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');fs.createReadStream(file).pipe(res);
+    res.setHeader('Content-Type',/\.m?js$/.test(file)?'text/javascript':file.endsWith('.css')?'text/css':'text/html');fs.createReadStream(file).pipe(res);
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));url='http://127.0.0.1:'+server.address().port+'/';
   browser=await webkit.launch({headless:true});
@@ -45,6 +45,7 @@ async function withPage(run){
     },fixture());
     const p=await context.newPage(),errors=[];p.on('pageerror',e=>errors.push(e.message));p.on('dialog',d=>d.dismiss());
     await p.goto(url,{waitUntil:'load'});
+    await p.waitForFunction(()=>window.trainingAppReady===true);
     // Completion sound is outside the preset contract; retain the real timer and DOM code.
     await p.evaluate(()=>{beep=()=>{};beepAction=()=>{};});
     const canonical=await p.evaluate(()=>JSON.stringify(getActiveProgram().days));

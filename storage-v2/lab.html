@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>训练器 · 存储迁移验证</title>
+  <link rel="stylesheet" href="lab.css">
+  <script type="module" src="lab.mjs"></script>
+</head>
+<body>
+  <main>
+    <header><p class="eyebrow">逐日训练器 · 本地验证</p><h1>存储迁移验证</h1>
+      <p>当前训练器仍使用原存储。此页只验证独立副本，不会切换、覆盖或清理现有训练记录。</p></header>
+    <section aria-labelledby="source-heading">
+      <h2 id="source-heading">1. 选择存档</h2>
+      <div class="actions"><button id="demo">使用匿名示例</button><label class="file-control">选择已导出的 JSON<input id="file" type="file" accept=".json,application/json"></label></div>
+      <p id="source-label" class="muted">尚未选择存档</p>
+      <dl id="inventory" class="inventory"></dl>
+      <p id="fingerprint" class="fingerprint"></p>
+    </section>
+    <section aria-labelledby="copy-heading">
+      <h2 id="copy-heading">2. 验证新存储</h2>
+      <p>保留原始文件，并逐项检查完整记录。已有不同副本时会停止，不会覆盖。</p>
+      <div class="actions"><button id="stage" class="primary" disabled>复制并验证</button><button id="inspect">检查已有验证副本</button></div>
+      <p id="status" role="status" aria-live="polite">等待选择存档</p>
+      <dl id="comparison" class="inventory"></dl>
+    </section>
+    <section aria-labelledby="export-heading">
+      <h2 id="export-heading">3. 导出复核</h2>
+      <div class="actions"><button id="export" disabled>导出验证后的总存档</button><button id="original" disabled>导出原始文件</button></div>
+      <p id="cloud" class="muted">云端：尚未连接。验证副本仍在本机浏览器，不能替代外部备份。</p>
+    </section>
+  </main>
+</body>
+</html>

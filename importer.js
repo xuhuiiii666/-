@@ -713,15 +713,21 @@ function refreshAfterProgramImport(message){
     state=getActiveProgram();PLAN=state.days;WARMUPS=(state.warmupDefinitions&&state.warmupDefinitions.length)?state.warmupDefinitions:(trainingTrackerState.builtinWarmups||BUILTIN_WARMUPS);
     templateWarning=(typeof isStorageQuotaError==='function'&&isStorageQuotaError(error))?'训练计划已保存，但动作模板更新因存储空间不足未保存。':'训练计划已保存，但动作模板自动更新失败。';
   }
-  rebuild();renderCalendar();renderHistory();alert(message+(templateWarning?'\n'+templateWarning:''));showTab('today');
-  if(templateWarning)showToast(templateWarning);
+  function refresh(){rebuild();renderCalendar();renderHistory();alert(message+(templateWarning?'\n'+templateWarning:''));showTab('today');if(templateWarning)showToast(templateWarning);}
+  if(typeof flushTrainingStorage==='function')return afterTrainingCommit(flushTrainingStorage(),refresh,function(error){
+    console.error('训练计划已保存，模板保存未完成',error);rebuild();renderCalendar();renderHistory();alert(message+'\n训练计划已保存，但动作模板更新未保存，请查看保存状态。');
+  });
+  refresh();
 }
 function importApplyErrorMessage(error){
   if(typeof isStorageQuotaError==='function'&&isStorageQuotaError(error)) return '训练计划已经识别成功，但浏览器本地存储空间不足，因此没有保存新计划。当前计划未修改。';
   return '无法识别该训练计划，没有修改当前训练计划。\n'+(error&&error.message?error.message:error);
 }
 function applyImportPlan(){
+  if(typeof setStorageOperationBusy==='function')setStorageOperationBusy(true);
   var committed=false;
+  function failed(error){console.error(committed?'导入已保存，但后续页面刷新失败':'导入训练计划失败',error);alert(committed?('训练计划已保存，但页面刷新失败。请刷新页面后继续使用。\n'+(error.message||error)):importApplyErrorMessage(error));}
+  function release(){if(typeof setStorageOperationBusy==='function')setStorageOperationBusy(false);}
   try{
     var program=programFromImportPreview();
     var exactDuplicate=typeof findDuplicateImportedProgram==='function'?findDuplicateImportedProgram(program):null;
@@ -730,20 +736,25 @@ function applyImportPlan(){
     var confirmText=similarSource?'当前已存在同名且 Workout 数量相同的计划，但内容不同。确认仍导入为新的 Program？不会覆盖现有计划。':'确认把“'+program.name+'”导入为新的训练计划？现有训练计划和记录不会被覆盖。';
     if(!confirm(confirmText)) return;
     var result=typeof addImportedProgram==='function'?addImportedProgram(program,true):{created:true,program:addProgram(program,true)};
+    if(result&&typeof result.then==='function')return result.then(function(value){committed=true;return refreshAfterProgramImport('已导入为新的训练计划：'+value.program.days.length+'天。');}).catch(failed).finally(release);
     if(!result.created){alert('当前已存在来源相同的计划：'+(result.program.name||result.program.sourceFileName||'未命名计划')+'。没有重复创建，也没有覆盖现有计划。');return;}
     committed=true;
     refreshAfterProgramImport('已导入为新的训练计划：'+result.program.days.length+'天。');
   }catch(error){
     console.error(committed?'导入已保存，但后续页面刷新失败':'导入训练计划失败',error);
     alert(committed?('训练计划已保存，但页面刷新失败。请刷新页面后继续使用。\n'+(error&&error.message?error.message:error)):importApplyErrorMessage(error));
-  }
+  }finally{if(!(result&&typeof result.then==='function'))release();}
 }
 function replaceCurrentWithImportPlan(){
   var committed=false;
   try{
     var program=programFromImportPreview();
     if(!confirm('确认替换当前训练计划？当前计划中的训练日、草稿和日志会被新的计划替换。其他训练计划不受影响。')) return;
-    replaceActiveProgram(program);
+    var saved=replaceActiveProgram(program);
+    if(saved&&typeof saved.then==='function'){
+      if(typeof setStorageOperationBusy==='function')setStorageOperationBusy(true);
+      return saved.then(function(){committed=true;return refreshAfterProgramImport('已替换当前训练计划：'+program.days.length+'天。');}).catch(function(error){alert(committed?'训练计划已保存，但页面刷新失败。':importApplyErrorMessage(error));}).finally(function(){if(typeof setStorageOperationBusy==='function')setStorageOperationBusy(false);});
+    }
     committed=true;
     refreshAfterProgramImport('已替换当前训练计划：'+program.days.length+'天。');
   }catch(error){
@@ -755,7 +766,7 @@ function resetImportedPlan(){
   if(!confirm('确认恢复示例计划？示例计划会作为新的训练计划加入，不覆盖当前训练日志。')) return;
   var program=createProgramFromPlan(BUILTIN_PLAN,{name:'示例训练计划',source:'builtin'});
   program.warmupDefinitions=BUILTIN_WARMUPS.slice();
-  addProgram(program,true);refreshAfterProgramImport('已恢复示例训练计划。');
+  return afterTrainingCommit(addProgram(program,true),function(){return refreshAfterProgramImport('已恢复示例训练计划。');});
 }
 function fillImportHintA(){
   document.getElementById('importBox').value='周次\\t日期\\t星期\\t阶段\\t训练主题\\t热身模板\\t训练内容（组×次数/余力）\\t组间休息/规则\\n1\\t2025-12-29\\t周一\\t增肌期\\t下肢A\\t下肢退阶热身\\t高脚杯箱式深蹲 4×6-8（余力3-4）\\nRDL 3×8（余力2-3）\\t主项3分钟；大辅助90-120秒';

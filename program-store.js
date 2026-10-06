@@ -15,6 +15,7 @@
     if(typeof global.saveRootCandidate!=='function') throw new Error('训练器存储边界尚未初始化。');
     return global.saveRootCandidate(root);
   }
+  function committedValue(result,value){return result&&typeof result.then==='function'?result.then(function(){return value;}):value;}
   function withSourceWorkoutKeys(days,source){
     return copy(days||[]).map(function(day,index){
       day=day||{};
@@ -36,8 +37,7 @@
     var next=global.normalizeProgram(program);
     profile.programs[next.programId]=next;
     if(activate!==false) root.activeProgramId=next.programId;
-    commitCandidate(root);
-    return next;
+    return committedValue(commitCandidate(root),next);
   }
   function normalizedSourceFileName(value){
     value=text(value);
@@ -91,7 +91,9 @@
   function addImportedProgram(program,activate){
     var existing=findDuplicateImportedProgram(program);
     if(existing)return {created:false,program:existing,existingProgram:existing};
-    return {created:true,program:addProgram(program,activate),existingProgram:null};
+    var saved=addProgram(program,activate);
+    function result(value){return {created:true,program:value,existingProgram:null};}
+    return saved&&typeof saved.then==='function'?saved.then(result):result(saved);
   }
   function uniqueWorkoutMap(days){
     var grouped={};asArray(days).forEach(function(day,index){var key=text(day&&day.sourceWorkoutKey);if(!key)return;(grouped[key]=grouped[key]||[]).push({day:day,index:index});});
@@ -141,8 +143,7 @@
     var next=global.normalizeProgram(Object.assign({},program,{programId:currentId}));
     next=mergeReplacementProgramState(oldProgram,next);
     profile.programs[currentId]=next;
-    commitCandidate(root);
-    return next;
+    return committedValue(commitCandidate(root),next);
   }
   function activateProgram(programId){
     var currentRoot=global.trainingTrackerState;
@@ -150,8 +151,7 @@
     var profile=global.getActiveProfile(root);
     if(!profile||!profile.programs[programId]) throw new Error('训练计划不存在。');
     root.activeProgramId=programId;
-    commitCandidate(root);
-    return global.getActiveProgram(root);
+    return committedValue(commitCandidate(root),global.getActiveProgram(root));
   }
   function createCustomWorkout(title,options){
     options=options||{};

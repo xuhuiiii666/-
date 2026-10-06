@@ -11,6 +11,7 @@
   var LEGACY_WARMUP_KEY=LEGACY_KEY+'_importedWarmups';
   var LEGACY_KEYS=[LEGACY_KEY,LEGACY_PLAN_KEY,LEGACY_WARMUP_KEY,LEGACY_KEY+'_importerMigrated_v3','training_warmup_collapsed'];
   var runtimeBuiltinWarmups=[];
+  var candidatePending=false;
 
   function copy(value){
     if(value===undefined) return undefined;
@@ -363,13 +364,15 @@
     options=options||{};
     root=root||global.trainingTrackerState;
     if(!root) return null;
-    var storedRaw=localStorage.getItem(ROOT_KEY),isRuntimeRoot=root===global.trainingTrackerState;
+    var backend=global.trainingStorageBackend;
+    var storedRaw=backend?backend.lastRaw:localStorage.getItem(ROOT_KEY),isRuntimeRoot=root===global.trainingTrackerState;
     if(!options.skipSync)syncProgram(getActiveProgram(root));
     root.schemaVersion=SCHEMA_VERSION;
     root.updatedAt=nowIso();
     var compact=compactState(root,{builtinWarmups:runtimeBuiltinWarmups});
     validateCompactedState(root,compact);
     var serialized=JSON.stringify(compact);
+    if(backend)return backend.save(compact).then(function(){return root;});
     try{
       if(storedRaw&&!localStorage.getItem(PRE_V6_BACKUP_KEY)){
         var storedVersion=0;
@@ -389,7 +392,19 @@
     }
     return root;
   }
-  function saveRootCandidate(root){saveRoot(root,{skipSync:true});bindRuntime(root);return root;}
+  function afterTrainingCommit(result,success,failure){
+    if(result&&typeof result.then==='function')return result.then(success).catch(failure||function(error){if(typeof global.reportStorageActionError==='function')global.reportStorageActionError(error);else throw error;});
+    return success(result);
+  }
+  function saveRootCandidate(root){
+    if(candidatePending)throw new Error('正在保存训练计划，请等待完成。');
+    var result=saveRoot(root,{skipSync:true});
+    if(result&&typeof result.then==='function'){
+      candidatePending=true;if(typeof global.setStorageOperationBusy==='function')global.setStorageOperationBusy(true);
+      return result.then(function(){bindRuntime(root);return root;}).finally(function(){candidatePending=false;if(typeof global.setStorageOperationBusy==='function')global.setStorageOperationBusy(false);});
+    }
+    bindRuntime(root);return root;
+  }
   function bindRuntime(root){
     root=root||global.trainingTrackerState;
     var profile=getActiveProfile(root);
@@ -402,7 +417,7 @@
   }
   function loadState(builtinPlan,builtinWarmups){
     runtimeBuiltinWarmups=copy(builtinWarmups||[]);
-    var rawText=localStorage.getItem(ROOT_KEY),raw=null,root=null;
+    var rawText=global.trainingStorageBackend?global.trainingStorageBackend.lastRaw:localStorage.getItem(ROOT_KEY),raw=null,root=null;
     if(rawText){
       try{raw=JSON.parse(rawText);}catch(error){console.error('训练器状态读取失败，已保留原数据',error);throw error;}
       if(!raw||!raw.profiles) throw new Error('已有 training-tracker-state 不是有效的训练器根状态，已停止写入。');
@@ -415,7 +430,13 @@
     return root;
   }
   function initializeTrainingTracker(builtinPlan,builtinWarmups){ return bindRuntime(loadState(builtinPlan,builtinWarmups)); }
-  function saveState(){ return saveRoot(global.trainingTrackerState); }
+  function saveState(){
+    var result=saveRoot(global.trainingTrackerState);
+    if(result&&typeof result.catch==='function')result.catch(function(){});
+    return result;
+  }
+  function flushTrainingStorage(){return global.trainingStorageBackend?global.trainingStorageBackend.flush():null;}
+  function notifyTrainingSaved(message){return afterTrainingCommit(flushTrainingStorage(),function(){alert(message);});}
   function hasPreV6Backup(){return !!localStorage.getItem(PRE_V6_BACKUP_KEY);}
   function summarizeStoredRoot(rawText){
     var summary={exists:rawText!==null,bytes:utf8Bytes(rawText||''),validJson:false,schemaVersion:null,profiles:0,programs:0,workouts:0,workoutLogs:0,weightedEntries:0,exerciseHistory:0,currentWorkoutDrafts:0,exerciseTemplates:0,warmupTemplates:0,activeProfileId:'',activeProgramId:'',currentWorkoutId:'',breakdown:{programDataBytes:0,duplicateAliasBytes:0,exerciseHistoryBytes:0,staticRawBytes:0}};
@@ -432,20 +453,24 @@
     return summary;
   }
   function inspectTrainingStorage(){
-    var rootRaw=localStorage.getItem(ROOT_KEY),backupRaw=localStorage.getItem(PRE_V6_BACKUP_KEY),legacy={};
+    var rootRaw=global.trainingStorageBackend?global.trainingStorageBackend.lastRaw:localStorage.getItem(ROOT_KEY),backupRaw=localStorage.getItem(PRE_V6_BACKUP_KEY),legacy={};
     LEGACY_KEYS.forEach(function(key){var raw=localStorage.getItem(key);legacy[key]=summarizeStoredRoot(raw);});
     return {rootKey:ROOT_KEY,root:summarizeStoredRoot(rootRaw),preV6:summarizeStoredRoot(backupRaw),legacy:legacy,usage:estimateStorageUsage()};
   }
   function estimateStorageUsage(){
-    var rootBytes=utf8Bytes(localStorage.getItem(ROOT_KEY)||''),backupBytes=utf8Bytes(localStorage.getItem(PRE_V6_BACKUP_KEY)||''),legacyBytes=0;
+    var backend=global.trainingStorageBackend;
+    var rootBytes=utf8Bytes(backend?backend.lastRaw:(localStorage.getItem(ROOT_KEY)||'')),backupBytes=utf8Bytes(localStorage.getItem(PRE_V6_BACKUP_KEY)||''),legacyBytes=0;
     LEGACY_KEYS.forEach(function(key){legacyBytes+=utf8Bytes(localStorage.getItem(key)||'');});
-    return {rootBytes:rootBytes,preV6BackupBytes:backupBytes,legacyBytes:legacyBytes,totalBytes:rootBytes+backupBytes+legacyBytes,dangerThresholdBytes:4*1024*1024};
+    return {backend:backend?'indexeddb':'localStorage',rootBytes:rootBytes,preV6BackupBytes:backupBytes,legacyBytes:legacyBytes,totalBytes:rootBytes+backupBytes+legacyBytes,dangerThresholdBytes:backend?Infinity:4*1024*1024};
   }
   function downloadRawStorageKey(key,fileName){
     var raw=localStorage.getItem(key);if(raw===null)throw new Error('没有找到 '+key+'。');
     var blob=new Blob([raw],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fileName||key+'-raw.json';document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){try{URL.revokeObjectURL(a.href);}catch(e){}},1000);return a.download;
   }
-  function exportRawTrainingState(){return downloadRawStorageKey(ROOT_KEY,'training-tracker-state-原始存档.json');}
+  function exportRawTrainingState(){
+    if(global.trainingStorageBackend){downloadBackupText(global.trainingStorageBackend.lastRaw,'training-tracker-state-原始存档.json');return 'training-tracker-state-原始存档.json';}
+    return downloadRawStorageKey(ROOT_KEY,'training-tracker-state-原始存档.json');
+  }
   function exportRawPreV6Backup(){return downloadRawStorageKey(PRE_V6_BACKUP_KEY,'training-tracker-state-pre-v6-原始备份.json');}
   function exportRawLegacyStorageKey(key){
     if(LEGACY_KEYS.indexOf(key)<0)throw new Error('不是训练器允许导出的 Legacy key。');
@@ -470,16 +495,18 @@
     if(!confirm('恢复升级前本地数据会替换当前浏览器状态。确认继续？'))return null;
     if(!confirm('请再次确认：恢复后，本次升级后产生但未备份的数据会被替换。'))return null;
     var raw=JSON.parse(text),restored=migrateRootTransaction(raw,[],[]);
-    saveRootCandidate(restored);
-    return restored;
+    if(global.NutritionModel)global.NutritionModel.protectBackup(global.trainingTrackerState,restored);
+    var saved=saveRootCandidate(restored);
+    return saved&&typeof saved.then==='function'?saved.then(function(){return restored;}):restored;
   }
 
   function buildCycleBackupObject(){
     if(typeof global.syncCurrentWorkoutFormToState==='function') global.syncCurrentWorkoutFormToState();
-    saveState();
+    var saved=saveState();
     var backupRoot=copy(global.trainingTrackerState);
     Object.keys(asObject(backupRoot&&backupRoot.profiles)).forEach(function(profileId){Object.keys(asObject(backupRoot.profiles[profileId].programs)).forEach(function(programId){var program=backupRoot.profiles[profileId].programs[programId];if(typeof global.buildExerciseHistoryFromLogs==='function')program.exerciseHistory=global.buildExerciseHistoryFromLogs(program.workoutLogs||[]);});});
-    return {version:SCHEMA_VERSION,exportedAt:nowIso(),app:'training-tracker',dateMode:'actualDate-first',state:backupRoot};
+    var backup={version:SCHEMA_VERSION,exportedAt:nowIso(),app:'training-tracker',dateMode:'actualDate-first',state:backupRoot};
+    return saved&&typeof saved.then==='function'?saved.then(function(){return backup;}):backup;
   }
   function cleanFilePart(value){return String(value||'').replace(/[\\/:*?"<>|]/g,'').replace(/\s+/g,' ').trim().slice(0,36)||'训练';}
   function formatBackupDateForName(value){var d=value?new Date(String(value).replace(/\//g,'-')):new Date();if(isNaN(d.getTime()))d=new Date();return (d.getMonth()+1)+'月'+d.getDate()+'号';}
@@ -490,13 +517,16 @@
     var actual=refLog&&(refLog.actualDate||refLog.date)||(typeof global.actualDateFor==='function'?global.actualDateFor(idx):'');
     return formatBackupDateForName(actual)+'-'+cleanFilePart(refLog&&refLog.title||day['训练主题']||day.title||('第'+(idx+1)+'练'))+'-（总存档）.json';
   }
-  function downloadCycleBackupFile(silent,refLog){
-    var data=JSON.stringify(buildCycleBackupObject(),null,2);
+  function downloadBackupText(data,fileName){
     var blob=new Blob([data],{type:'application/json'});
-    var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=getBackupFileName(refLog);document.body.appendChild(a);a.click();document.body.removeChild(a);
+    var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fileName;document.body.appendChild(a);a.click();document.body.removeChild(a);
     setTimeout(function(){try{URL.revokeObjectURL(a.href);}catch(e){}},1000);
-    if(!silent) alert('已导出周期备份：'+a.download);
     return a.download;
+  }
+  function downloadCycleBackupFile(silent,refLog){
+    var fileName=getBackupFileName(refLog),backup=buildCycleBackupObject();
+    function download(value){downloadBackupText(JSON.stringify(value,null,2),fileName);if(!silent)alert('已导出周期备份：'+fileName);return fileName;}
+    return backup&&typeof backup.then==='function'?backup.then(download):download(backup);
   }
   function exportCycleBackup(){
     if(typeof global.syncCurrentWorkoutFormToState==='function') global.syncCurrentWorkoutFormToState();
@@ -504,7 +534,8 @@
       if(!confirm('当前正式训练没有记录任何重量，是否继续导出？')) return;
     }
     if(typeof global.rebuildCurrentWorkoutLogDraft==='function') global.rebuildCurrentWorkoutLogDraft();
-    var active=getActiveProgram();if(active)active.lastBackupAt=nowIso();saveState();downloadCycleBackupFile(false);
+    var active=getActiveProgram();if(active)active.lastBackupAt=nowIso();
+    return afterTrainingCommit(saveState(),function(){return downloadCycleBackupFile(false);});
   }
   function importBackupObject(obj){
     if(!obj||typeof obj!=='object') throw new Error('不是有效的训练器备份。');
@@ -525,15 +556,17 @@
         if(typeof global.buildExerciseHistoryFromLogs==='function') program.exerciseHistory=global.buildExerciseHistoryFromLogs(program.workoutLogs||[]);
       });
     });
-    saveRootCandidate(root);return root;
+    if(global.NutritionModel)global.NutritionModel.protectBackup(global.trainingTrackerState,root);
+    var saved=saveRootCandidate(root);return saved&&typeof saved.then==='function'?saved.then(function(){return root;}):root;
   }
   function importCycleBackupFile(event){
     var file=event&&event.target&&event.target.files&&event.target.files[0];if(!file)return;
     var reader=new FileReader();
-    reader.onload=function(){
+    reader.onload=async function(){
       try{
-        var obj=JSON.parse(reader.result);if(!confirm('确认导入周期备份？当前浏览器里的训练记录会被备份内容覆盖。'))return;
-        importBackupObject(obj);
+        var obj=JSON.parse(reader.result);if(!confirm('确认导入周期备份？训练记录会被备份内容覆盖；备份含饮食记录时也会恢复饮食，旧版备份不含饮食时保留当前饮食记录。'))return;
+        if(typeof global.setStorageOperationBusy==='function')global.setStorageOperationBusy(true);
+        await importBackupObject(obj);
         if(typeof global.dedupeTemplateLibraries==='function')global.dedupeTemplateLibraries();
         if(typeof global.rebuild==='function')global.rebuild();
         if(typeof global.renderHistory==='function')global.renderHistory();
@@ -545,8 +578,8 @@
       }catch(error){
         console.error('导入周期备份失败',error);
         if(isStorageQuotaError(error))alert('周期备份已经识别成功，但浏览器本地存储空间不足，因此没有覆盖当前数据。请先导出原始本地存档并清理升级快照。');
-        else alert('导入失败：不是有效的训练器备份 JSON。');
-      }
+        else alert('导入失败：'+(error.message||'不是有效的训练器备份 JSON。'));
+      }finally{if(typeof global.setStorageOperationBusy==='function')global.setStorageOperationBusy(false);}
     };
     reader.readAsText(file);if(event.target)event.target.value='';
   }
@@ -565,6 +598,9 @@
   global.normalizeProgram=normalizeProgram;
   global.loadState=loadState;
   global.saveState=saveState;
+  global.afterTrainingCommit=afterTrainingCommit;
+  global.flushTrainingStorage=flushTrainingStorage;
+  global.notifyTrainingSaved=notifyTrainingSaved;
   global.saveRootCandidate=saveRootCandidate;
   global.compactState=compactState;
   global.validateCompactedState=validateCompactedState;
