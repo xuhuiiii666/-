@@ -69,7 +69,7 @@ function harness(){
     rebuild(){},showToast:message=>h.alerts.push(message),alert:message=>h.alerts.push(String(message)),downloadCycleBackupFile(){},
     finishWorkoutInProgress:false,lastFinishedWorkoutIntent:null
   });
-  loadFunctions(c,['currentDraftKey','readSetRow','writeSetRow','draftCanonicalWarmups','draftSetBelongsToExercise','mergeReadableDraftItems',
+  loadFunctions(c,['hasPendingHistoryWeight','currentDraftKey','readSetRow','writeSetRow','draftCanonicalWarmups','draftSetBelongsToExercise','mergeReadableDraftItems',
     'findCurrentSet','updateSetValue','captureCurrentWorkoutDraft','hasIncompleteMainWorkoutRender','syncCurrentWorkoutFormToState','rebuildCurrentWorkoutLogDraft',
     'restoreDraftCardSets','restoreCurrentWorkoutDraft','clearCurrentWorkoutDraft',
     'setWarmupPanelCollapsed','toggleWarmupPanel','initWarmupPanel','initWorkoutUiPreferences',

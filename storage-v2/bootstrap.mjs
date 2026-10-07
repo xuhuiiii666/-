@@ -1,4 +1,4 @@
-import {openRuntimeStorage, activateRuntimeStorage, DATABASE_NAME} from './runtime.mjs?v=20261006-nutrition-local-1';
+import {openRuntimeStorage, activateRuntimeStorage, DATABASE_NAME} from './runtime.mjs?v=20261007-working-set-reference-1';
 import {TrainingDatabase} from './database.mjs';
 
 const $ = id => document.getElementById(id);

@@ -7,10 +7,9 @@
     return String(value==null?'':value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
   function normalized(name){
-    if(typeof global.normalizeTemplateKey==='function') return global.normalizeTemplateKey(name);
-    return String(name||'').normalize?String(name||'').normalize('NFKC').trim().replace(/\s+/g,' ').replace(/（/g,'(').replace(/）/g,')').toLowerCase():String(name||'').trim().toLowerCase();
+    return String(name||'').normalize('NFKC').replace(/【\s*本块增量\s*】|\{\s*本块增量\s*\}/g,'').replace(/\s+/g,'').toLowerCase();
   }
-  function comparableHistoryName(name){return normalized(name).replace(/\([^)]*\)/g,'').replace(/\s+/g,' ').trim();}
+  function comparableHistoryName(name){return normalized(name).replace(/\((?:高张力|肌肥大|张力日|容量日|重点日)(?:减载)?\)/g,'');}
   function logsFrom(src){src=src||{};var logs=src.workoutLogs||src.logs||src.trainingLogs||src.history||src.completedWorkouts||[];return Array.isArray(logs)?logs:[];}
   function activeProfile(root){
     root=root||{};var profiles=root.profiles||{},profileId=root.activeProfileId;
@@ -76,6 +75,63 @@
     return records.sort(function(a,b){var da=String(a.date||''),db=String(b.date||'');return da===db?(b.sourceLogIndex||0)-(a.sourceLogIndex||0):db.localeCompare(da);});
   }
   function getLastExercisePerformance(name){return recordsFor(name).find(function(record){return record&&record.sets&&record.sets.some(function(set){return Number(set.weightKg)>0||!!set.weight;});})||null;}
+  function ordinaryExercise(exercise){
+    return !!exercise&&!exercise.isWarmup&&exercise.countsAsWorkingSet!==false&&
+      !/warmup|skill|technique/.test(exercise.trainingRole||'')&&
+      !/功能|热身|基本功|技能/.test(exercise.section||'')&&
+      !/必要时辅助/.test(entryName(exercise));
+  }
+  function entryName(entry){return entry.trackingName||entry.trackName||entry.name||entry.originalName||'';}
+  function plainText(value){return String(value||'').normalize('NFKC').replace(/\s+/g,'').toLowerCase();}
+  // Old logs lack set types. Only a unique, unchanged source prescription can prove one.
+  function ordinarySetEvidence(program,log,entry){
+    if(entry.segment||(entry.segments||[]).length||entry.loadAdjustmentType||!ordinaryExercise(entry))return false;
+    if(entry.setType)return entry.setType==='working';
+    if(!log.workoutId||!entry.target||entry.target==='动作模板')return false;
+    var days=(program.days||[]).filter(function(day){return day.workoutId===log.workoutId;});
+    if(days.length!==1)return false;
+    var day=days[0],title=log.title||log.workoutTitle;
+    if(log.sourceWorkoutKey&&log.sourceWorkoutKey!==day.sourceWorkoutKey)return false;
+    if(!title||plainText(title)!==plainText(day.title||day['训练主题']))return false;
+    var exercises=(day.exercises||[]).filter(function(ex){
+      return ordinaryExercise(ex)&&normalized(entryName(ex))===normalized(entryName(entry))&&
+        plainText(ex.line)===plainText(entry.target)&&(!entry.exerciseId||entry.exerciseId===ex.exerciseId);
+    });
+    if(exercises.length!==1||!/^\d+$/.test(String(entry.set||entry.setNo||'')))return false;
+    var sets=(exercises[0].sets||[]).filter(function(set,index){return entry.setId?set.setId===entry.setId:Number(set.setNo||index+1)===Number(entry.set||entry.setNo);});
+    return sets.length===1&&sets[0].setType==='working'&&!sets[0].loadAdjustmentType&&!(sets[0].segments||[]).length;
+  }
+  function getLastOrdinaryWorkingSet(root,name){
+    var profile=activeProfile(root),key=normalized(name),sessions=[];
+    if(!profile||!key)return null;
+    Object.keys(profile.programs||{}).forEach(function(programId){
+      var program=profile.programs[programId];
+      logsFrom(program).forEach(function(log,index){
+        if(/草稿|预览|draft|preview/i.test(log.status||'')||!logDate(log))return;
+        var candidates=[];
+        itemsFrom(log).forEach(function(item){
+          if(item.type&&!/主训练/.test(item.type))return;
+          (Array.isArray(item.sets)?item.sets:[item]).forEach(function(set,si){
+            var entry=Object.assign({},item,set);delete entry.sets;
+            if(normalized(entryName(entry))!==key||!ordinarySetEvidence(program,log,entry))return;
+            var unit=entry.unit||'kg',weight=Number(entry.weight);
+            if(entry.weight===undefined||entry.weight===null||entry.weight==='')weight=unit==='kg'?Number(entry.weightKg):NaN;
+            if(!['kg','lb'].includes(unit)||!Number.isFinite(weight)||weight<=0)return;
+            var setNo=Number(entry.set||entry.setNo||si+1);if(!Number.isInteger(setNo)||setNo<1)return;
+            candidates.push({weight:String(weight),unit:unit,weightKg:kg(weight,unit),reps:entry.reps,rir:entry.rir,
+              setNo:setNo,name:entryName(entry),exerciseId:entry.exerciseId||'',setId:entry.setId||''});
+          });
+        });
+        if(candidates.length){
+          candidates.sort(function(a,b){return b.setNo-a.setNo;});
+          sessions.push(Object.assign({},candidates[0],{date:logDate(log),workoutId:log.workoutId||'',programId:programId,
+            logIndex:index,sessionTime:log.completedAt||log.createdAt||'',title:log.title||log.workoutTitle||''}));
+        }
+      });
+    });
+    sessions.sort(function(a,b){return String(b.date).localeCompare(String(a.date))||String(b.sessionTime).localeCompare(String(a.sessionTime))||b.logIndex-a.logIndex||a.programId.localeCompare(b.programId);});
+    return sessions[0]||null;
+  }
   function displaySet(set){
     var weight=set.weight?String(set.weight)+(set.unit||'kg'):(set.duration?set.duration+'s':'-');
     return (set.set?('第'+set.set+'组 '):'')+weight+(set.reps?('×'+set.reps):'')+(set.rir?(' RIR '+set.rir):'');
@@ -111,6 +167,9 @@
   global.comparableExerciseHistoryName=comparableHistoryName;
   global.getExerciseHistoryRecords=recordsFor;
   global.getLastExercisePerformance=getLastExercisePerformance;
+  global.normalizeHistoryExerciseName=normalized;
+  global.isOrdinaryWorkingExercise=ordinaryExercise;
+  global.getLastOrdinaryWorkingSet=getLastOrdinaryWorkingSet;
   global.lastReferenceHTML=lastReferenceHTML;
   global.openExerciseHistory=openExerciseHistory;
   global.closeExerciseHistory=closeExerciseHistory;

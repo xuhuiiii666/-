@@ -69,7 +69,7 @@ function harness(){
     rebuild(){},showToast:message=>h.alerts.push(message),alert:message=>h.alerts.push(String(message)),downloadCycleBackupFile(){},
     finishWorkoutInProgress:false,lastFinishedWorkoutIntent:null
   });
-  loadFunctions(c,['currentDraftKey','readSetRow','writeSetRow','draftCanonicalWarmups','draftSetBelongsToExercise','mergeReadableDraftItems',
+  loadFunctions(c,['hasPendingHistoryWeight','currentDraftKey','readSetRow','writeSetRow','draftCanonicalWarmups','draftSetBelongsToExercise','mergeReadableDraftItems',
     'findCurrentSet','updateSetValue','captureCurrentWorkoutDraft','hasIncompleteMainWorkoutRender','syncCurrentWorkoutFormToState','rebuildCurrentWorkoutLogDraft',
     'restoreDraftCardSets','restoreCurrentWorkoutDraft','clearCurrentWorkoutDraft',
     'setWarmupPanelCollapsed','toggleWarmupPanel','initWarmupPanel','initWorkoutUiPreferences',
@@ -97,7 +97,7 @@ function previewHarness(){
   loadFunctions(c,['workoutKeyForIndex','workoutIndexForKey','readWorkoutMap','writeWorkoutMap','plannedDateFor',
     'refreshRuntimeDateIntegrity','trustedRuntimeDates','actualDateFor','latestActualPosition','scheduledDateFor','effectiveDateFor',
     'markActualTrainingDate','markCurrentTrainingToday','getCurrentSessionNote','setCurrentSessionNote','renderNoteInputs','syncFloatingNote',
-    'collectMainCardEntries','collectEntries','formatEntryLine','buildBriefText','showBrief','buildWorkoutPreviewSnapshot','previewCurrentBrief']);
+    'currentWorkoutExerciseById','collectMainCardEntries','collectEntries','formatEntryLine','buildBriefText','showBrief','buildWorkoutPreviewSnapshot','previewCurrentBrief']);
   h.brief=brief;h.note=note;h.floating=floating;
   h.bytes=()=>JSON.stringify(c.trainingTrackerState);
   h.view=()=>{c.previewCurrentBrief();return brief.textContent;};
@@ -182,4 +182,3 @@ test('A06-13 preview cannot call execution, draft, synchronization or persistenc
     h.c[name]=()=>assert.fail('Preview called mutating helper: '+name);
   unchanged(h,()=>h.view());
 });
-
