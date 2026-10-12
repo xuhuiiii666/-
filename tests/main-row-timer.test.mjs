@@ -15,7 +15,7 @@ function harness(){
     renderTimer(){},saveState(){saves++;},updateRestValue(){},fmt:s=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`,
     setInterval:fn=>{intervals.set(++next,fn);return next;},clearInterval:id=>intervals.delete(id),beep:()=>notes++,beepAction(){},markSetNeedFinish(){}};
   c.window=c;vm.createContext(c);vm.runInContext('var activeSet=null,timerLeft=180,timerBase=180,timerId=null,activeTimerContext=null;',c);
-  load(c,'startRowTimer');load(c,'tickRealTimer');
+  load(c,'startRowTimer');load(c,'tickRealTimer');load(c,'reportRestTimerSaveFailure');
   function add(id,rest){const row={rest,classList:classes(),setAttribute(){},closest(){return null;}};rows[id]=row;nodes['row_'+id]=row;nodes['rest_'+id]={classList:classes(),querySelector:()=>({value:String(rest)})};nodes['mt_'+id]={textContent:c.fmt(rest)};}
   add('warmup-safe-id',30);for(let i=1;i<=3;i++)add('longform:row:001:exercise:01:set:'+i,180);
   return {c,rows,nodes,draft,intervals,advance:ms=>{now+=ms;c.tickRealTimer();},state:()=>vm.runInContext('({activeSet,timerLeft,activeTimerContext})',c),saves:()=>saves,notes:()=>notes};

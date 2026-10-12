@@ -2687,7 +2687,7 @@ function startRowTimer(id,forcedRest){
   var sec=parseInt(forcedRest || (draftSet&&draftSet.rest) || (slider?slider.value:timerBase) || 90,10);
   if(slider && String(slider.value)!==String(sec)){
     slider.value=sec;
-    updateRestValue(id,sec);
+    updateRestValue(id,sec,{renderOnly:true});
   }
   rowTimers[id]={left:sec,base:sec,running:true};
   timerBase=sec; timerLeft=sec; renderTimer();
@@ -2696,10 +2696,21 @@ function startRowTimer(id,forcedRest){
   clearInterval(timerId);
   if(rowTimers[id]) rowTimers[id].endAt=Date.now()+sec*1000;
   activeTimerContext={type:'rest',id:id,endAt:Date.now()+sec*1000};
-  captureCurrentWorkoutDraft();
-  saveState();
   timerId=setInterval(tickRealTimer,1000);
   tickRealTimer();
+  // A failed persistence attempt must not prevent the independent clock ticking.
+  try{
+    captureCurrentWorkoutDraft();
+    var saved=saveState();
+    if(saved&&typeof saved.catch==='function')saved.catch(reportRestTimerSaveFailure);
+  }catch(error){reportRestTimerSaveFailure(error);}
+}
+function reportRestTimerSaveFailure(error){
+  console.error('[rest timer save]',error);
+  var message='倒计时继续运行，但本组记录未保存：'+(error.message||error)+' 请先导出页面数据，再到设置检查存储。';
+  var status=document.getElementById('storageSaveStatus');
+  if(status){status.hidden=false;status.textContent=message;status.dataset.error='true';}
+  else alert(message);
 }
 function beep(){ notifyTimerDone('组间休息结束','可以开始下一组了。'); }
 function notifyPermission(){

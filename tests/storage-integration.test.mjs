@@ -197,3 +197,44 @@ test('SI16 custom Workout and custom Exercise survive reload with original stabl
   const restored=await p.evaluate(ids=>{const w=state.days.find(w=>w.workoutId===ids.workout);return w.exercises[0];},ids);
   assert.equal(restored.exerciseId,ids.exercise);assert.equal(restored.sets[0].setId,'custom-fixed-set');
 }));
+
+async function rejectLocalWrites(p){
+  await p.evaluate(()=>{const original=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key==='training-tracker-state')throw new DOMException('injected full localStorage','QuotaExceededError');return original.call(this,key,value);};});
+}
+test('SQ1 localStorage quota cannot block main row interval; ROOT and history unchanged',()=>withPage(async p=>{
+  const before=await legacy(p),logs=await p.evaluate(()=>JSON.stringify(state.workoutLogs));await rejectLocalWrites(p);
+  const row=p.locator('#exercises .setrow').first(),id=await row.getAttribute('data-set-id');
+  await row.locator('.restBtn').tap();
+  assert.match(await p.locator('#storageSaveStatus').textContent(),/本组记录未保存/);
+  await p.waitForFunction(id=>document.getElementById('mt_'+id).textContent==='02:58',id);
+  assert.equal(await p.evaluate(()=>activeTimerContext.type),'rest');
+  assert.equal(await legacy(p),before);assert.equal(await p.evaluate(()=>JSON.stringify(state.workoutLogs)),logs);
+  await p.evaluate(()=>pauseTimer());
+}));
+test('SQ2 warmup quota keeps ticking; endAt recovery and single interval survive repeated rest',()=>withPage(async p=>{
+  const before=await legacy(p),logs=await p.evaluate(()=>JSON.stringify(state.workoutLogs));
+  await p.evaluate(()=>{window.__intervals=new Set();const start=window.setInterval,stop=window.clearInterval;window.setInterval=(fn,ms)=>{const id=start(fn,ms);__intervals.add(id);return id;};window.clearInterval=id=>{__intervals.delete(id);stop(id);};});
+  await rejectLocalWrites(p);
+  const id=await p.locator('#warmupExercises .setrow').first().getAttribute('data-set-id');
+  await p.evaluate(id=>startRowTimer(id,30),id);
+  await p.waitForFunction(id=>document.getElementById('mt_'+id).textContent==='00:28',id);
+  await p.evaluate(id=>startRowTimer(id,180),id);
+  assert.equal(await p.evaluate(id=>document.getElementById('mt_'+id).textContent,id),'03:00');
+  assert.match(await p.locator('#storageSaveStatus').textContent(),/本组记录未保存/);
+  await p.waitForFunction(id=>document.getElementById('mt_'+id).textContent==='02:59',id);
+  const end=await p.evaluate(()=>activeTimerContext.endAt);
+  await p.evaluate(()=>{activeTimerContext.endAt-=10000;window.dispatchEvent(new Event('focus'));});
+  assert.equal(await p.evaluate(()=>activeTimerContext.endAt),end-10000);
+  assert.ok(await p.evaluate(()=>timerLeft<=170&&timerLeft>=168));
+  assert.equal(await p.evaluate(()=>__intervals.size),1);
+  assert.equal(await legacy(p),before);assert.equal(await p.evaluate(()=>JSON.stringify(state.workoutLogs)),logs);
+  await p.evaluate(()=>pauseTimer());
+}));
+test('SQ3 rejected async database save does not stop row clock or claim saved',()=>withPage(async p=>{
+  await activate(p);const before=await disk(p);
+  await p.evaluate(()=>trainingStorageBackend.database.db.metadata.hook('updating',()=>{throw new DOMException('injected quota','QuotaExceededError');}));
+  const row=p.locator('#exercises .setrow').first(),id=await row.getAttribute('data-set-id');await row.locator('.restBtn').tap();
+  await p.waitForFunction(()=>document.getElementById('storageSaveStatus').textContent.includes('本组记录未保存'));
+  await p.waitForFunction(id=>document.getElementById('mt_'+id).textContent==='02:58',id);
+  assert.equal(await disk(p),before);await p.evaluate(()=>pauseTimer());
+}));
