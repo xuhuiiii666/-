@@ -53,11 +53,146 @@ async function withPage(run){
 async function activate(p){
   await p.evaluate(()=>showTab('settings'));
   await p.locator('#activateStorage').tap();
+  await Promise.all([p.waitForEvent('load'),p.locator('#activateStorage').tap()]);
+  await p.waitForFunction(()=>window.trainingAppReady);
   await p.waitForFunction(()=>!!window.trainingStorageBackend && document.getElementById('storageBusy').hidden);
   await p.evaluate(()=>showTab('today'));
 }
 const disk=p=>p.evaluate(async()=>JSON.stringify((await trainingStorageBackend.database.read()).root));
 const legacy=p=>p.evaluate(()=>localStorage.getItem('training-tracker-state'));
+test('MS1 rescue precedes activation; reload binds A, never B; first save preserves identities and history',()=>withPage(async p=>{
+  await weight(p,'60');
+  const before=await legacy(p);
+  const initial=await p.evaluate(()=>JSON.stringify({drafts:state.currentWorkoutDrafts,index:state.currentIndex,id:state.currentWorkoutId,logs:state.workoutLogs,dates:state.actualDates}));
+  await p.evaluate(()=>{
+    state.currentWorkoutDrafts.__unsaved={weight:'77',userEditedFields:['weight']};
+    document.querySelector('#exercises [data-field="weight"]').value='77';
+    showTab('settings');
+  });
+  const download=p.waitForEvent('download');await p.locator('#activateStorage').tap();
+  const rescue=JSON.parse(fs.readFileSync(await (await download).path(),'utf8'));
+  assert.equal(rescue.rootRaw,before);assert.equal(rescue.state.profiles.PF.programs.P1.currentWorkoutDrafts.__unsaved.weight,'77');
+  assert.ok(rescue.pageRecovery.inputs.some(i=>i.field==='weight'&&i.value==='77'));
+  assert.equal(await p.evaluate(()=>trainingStorageBackend),null);
+  await Promise.all([p.waitForEvent('load'),p.locator('#activateStorage').tap()]);await p.waitForFunction(()=>window.trainingAppReady);
+  assert.equal(await disk(p),before);assert.equal(await legacy(p),before);
+  assert.equal(await p.evaluate(()=>state===trainingTrackerState.profiles.PF.programs.P1&&PLAN===state.days),true);
+  assert.equal(await p.evaluate(()=>JSON.stringify({drafts:state.currentWorkoutDrafts,index:state.currentIndex,id:state.currentWorkoutId,logs:state.workoutLogs,dates:state.actualDates})),initial);
+  assert.notEqual(await p.locator('#exercises [data-field="weight"]').first().inputValue(),'77');
+  await p.evaluate(()=>saveState());await flush(p);
+  const saved=JSON.parse(await disk(p)),old=JSON.parse(before),pg=saved.profiles.PF.programs.P1;
+  assert.equal(pg.currentWorkoutDrafts.__unsaved,undefined);
+  assert.deepEqual(pg.workoutLogs,old.profiles.PF.programs.P1.workoutLogs);
+  assert.deepEqual(pg.actualDates,old.profiles.PF.programs.P1.actualDates);
+  assert.deepEqual(pg.currentWorkoutDrafts,old.profiles.PF.programs.P1.currentWorkoutDrafts);
+  assert.deepEqual(pg.completed,old.profiles.PF.programs.P1.completed);
+  assert.deepEqual(pg.days,old.profiles.PF.programs.P1.days);
+  const ids=r=>Object.values(r.profiles.PF.programs).flatMap(p=>p.days.flatMap(d=>[d.workoutId,...(d.exercises||[]).flatMap(e=>[e.exerciseId,...e.sets.map(s=>s.setId)])]));
+  assert.deepEqual(ids(saved),ids(old));assert.equal(await legacy(p),before);
+}));
+
+test('MS2 readback failure leaves activation absent and runtime/drafts/ROOT untouched',()=>withPage(async p=>{
+  const before=await legacy(p),runtime=await p.evaluate(()=>JSON.stringify(trainingTrackerState));
+  await p.evaluate(async()=>{
+    const {TrainingDatabase}=await import('/storage-v2/database.mjs?v='+window.APP_BUILD_VERSION);
+    TrainingDatabase.prototype.read=async()=>{throw new Error('readback injected');};
+    showTab('settings');
+  });
+  await p.locator('#activateStorage').tap();await p.locator('#activateStorage').tap();
+  await p.waitForFunction(()=>window.trainingStorageMigrationInProgress===false);
+  assert.equal(await p.evaluate(()=>trainingStorageBackend),null);
+  assert.equal(await p.evaluate(()=>trainingStorageMigrationInProgress),false);
+  assert.equal(await legacy(p),before);assert.equal(await p.evaluate(()=>JSON.stringify(trainingTrackerState)),runtime);
+  assert.equal(await p.evaluate(async()=>{const {TrainingDatabase}=await import('/storage-v2/database.mjs?v='+window.APP_BUILD_VERSION);const db=new TrainingDatabase('training-tracker-data');const a=await db.db.metadata.get('activation');db.close();return !!a;}),false);
+}));
+
+test('MS3 activation transaction abort leaves copy inactive and permits safe retry',()=>withPage(async p=>{
+  const before=await legacy(p);
+  const result=await p.evaluate(async()=>{
+    const {TrainingDatabase}=await import('/storage-v2/database.mjs?v='+window.APP_BUILD_VERSION);const {activateRuntimeStorage,openRuntimeStorage}=await import('/storage-v2/runtime.mjs?v='+window.APP_BUILD_VERSION);
+    const original=TrainingDatabase.prototype.activateVerified;
+    TrainingDatabase.prototype.activateVerified=function(...args){this.db.metadata.hook('creating',(key,obj)=>{if(obj.key==='activation')throw new DOMException('quota','QuotaExceededError');});return original.apply(this,args);};
+    let failed=false;try{await activateRuntimeStorage(localStorage.getItem('training-tracker-state'),localStorage);}catch{failed=true;}
+    TrainingDatabase.prototype.activateVerified=original;
+    const inactive=(await openRuntimeStorage(localStorage))===null;
+    const retry=await activateRuntimeStorage(localStorage.getItem('training-tracker-state'),localStorage);const same=retry.lastRaw===localStorage.getItem('training-tracker-state');retry.database.close();
+    return {failed,inactive,same};
+  });
+  assert.deepEqual(result,{failed:true,inactive:true,same:true});assert.equal(await legacy(p),before);
+}));
+
+test('MS4 migration write gate blocks both old ROOT and candidate saves without mutation',()=>withPage(async p=>{
+  const before=await legacy(p),runtime=await p.evaluate(()=>JSON.stringify(trainingTrackerState));
+  const result=await p.evaluate(async()=>{
+    trainingStorageMigrationInProgress=true;let blocked=0;
+    for(const fn of [()=>saveState(),()=>saveRootCandidate(JSON.parse(JSON.stringify(trainingTrackerState)))]){try{await fn();}catch(e){if(e.message.includes('正在切换'))blocked++;}}
+    trainingStorageMigrationInProgress=false;return blocked;
+  });
+  assert.equal(result,2);assert.equal(await legacy(p),before);assert.equal(await p.evaluate(()=>JSON.stringify(trainingTrackerState)),runtime);
+}));
+
+test('MS5 changed page input requires a new independent rescue before activation',()=>withPage(async p=>{
+  await p.evaluate(()=>showTab('settings'));await p.locator('#activateStorage').tap();
+  await p.evaluate(()=>document.querySelector('#exercises [data-field="weight"]').value='81');
+  const download=p.waitForEvent('download');await p.locator('#activateStorage').tap();
+  const rescue=JSON.parse(fs.readFileSync(await (await download).path(),'utf8'));
+  assert.ok(rescue.pageRecovery.inputs.some(i=>i.value==='81'));assert.equal(await p.evaluate(()=>trainingStorageBackend),null);
+}));
+
+test('MS6 unchanged repeated activation does not duplicate data or logs',()=>withPage(async p=>{
+  const before=await legacy(p);
+  const result=await p.evaluate(async()=>{
+    const {activateRuntimeStorage}=await import('/storage-v2/runtime.mjs?v='+window.APP_BUILD_VERSION);const raw=localStorage.getItem('training-tracker-state');
+    const one=await activateRuntimeStorage(raw,localStorage);const first=one.lastRaw;one.database.close();
+    const two=await activateRuntimeStorage(raw,localStorage);const r={same:first===two.lastRaw,revision:two.revision};two.database.close();return r;
+  });
+  assert.deepEqual(result,{same:true,revision:1});assert.equal(await legacy(p),before);
+}));
+
+test('MS7 old-tab change before activation commit is rejected without selecting either source',()=>withPage(async p=>{
+  const result=await p.evaluate(async()=>{
+    const {TrainingDatabase}=await import('/storage-v2/database.mjs?v='+window.APP_BUILD_VERSION);const {activateRuntimeStorage,openRuntimeStorage}=await import('/storage-v2/runtime.mjs?v='+window.APP_BUILD_VERSION);
+    const original=TrainingDatabase.prototype.activateVerified;const raw=localStorage.getItem('training-tracker-state');
+    TrainingDatabase.prototype.activateVerified=function(...args){localStorage.setItem('training-tracker-state',raw+' ');return original.apply(this,args);};
+    let code;try{await activateRuntimeStorage(raw,localStorage);}catch(e){code=e.code;}
+    TrainingDatabase.prototype.activateVerified=original;
+    return {code,inactive:await openRuntimeStorage(localStorage)===null,sourceUnchanged:localStorage.getItem('training-tracker-state')===raw+' '};
+  });assert.deepEqual(result,{code:'LEGACY_CHANGED',inactive:true,sourceUnchanged:true});
+}));
+
+test('MS8 declined rescue confirmation leaves all storage unchanged',()=>withPage(async p=>{
+  const before=await legacy(p);await p.evaluate(()=>showTab('settings'));await p.locator('#activateStorage').tap();
+  p.removeAllListeners('dialog');p.on('dialog',d=>d.dismiss());await p.locator('#activateStorage').tap();
+  assert.equal(await p.evaluate(()=>trainingStorageBackend),null);assert.equal(await legacy(p),before);
+}));
+
+test('MS9 real in-flight activation rejects saves before touching runtime or legacy storage',()=>withPage(async p=>{
+  const before=await legacy(p);
+  await p.evaluate(async()=>{
+    const {TrainingDatabase}=await import('/storage-v2/database.mjs?v='+window.APP_BUILD_VERSION);const original=TrainingDatabase.prototype.stageSource;
+    TrainingDatabase.prototype.stageSource=async function(...args){await new Promise(resolve=>window.__resumeCopy=resolve);return original.apply(this,args);};
+    showTab('settings');
+  });
+  await p.locator('#activateStorage').tap();await p.locator('#activateStorage').tap();
+  await p.waitForFunction(()=>typeof window.__resumeCopy==='function');
+  const blocked=await p.evaluate(async()=>{const before=JSON.stringify(trainingTrackerState);let failed=false;try{await saveState();}catch(e){failed=e.message.includes('正在切换');}return {failed,unchanged:before===JSON.stringify(trainingTrackerState),locked:document.querySelector('main')?.inert||document.getElementById('storageBusy').hidden===false};});
+  assert.deepEqual(blocked,{failed:true,unchanged:true,locked:true});assert.equal(await legacy(p),before);
+  await Promise.all([p.waitForEvent('load'),p.evaluate(()=>__resumeCopy())]);await p.waitForFunction(()=>window.trainingAppReady);
+  assert.equal(await disk(p),before);assert.equal(await legacy(p),before);
+}));
+
+test('MS10 mismatched readback cannot activate a different state',()=>withPage(async p=>{
+  const before=await legacy(p);
+  const result=await p.evaluate(async()=>{
+    const {TrainingDatabase}=await import('/storage-v2/database.mjs?v='+window.APP_BUILD_VERSION);const {activateRuntimeStorage,openRuntimeStorage}=await import('/storage-v2/runtime.mjs?v='+window.APP_BUILD_VERSION);
+    const original=TrainingDatabase.prototype.read;
+    TrainingDatabase.prototype.read=async function(){const snapshot=await original.call(this);snapshot.root.ui.unconfirmed='B';return snapshot;};
+    let code;try{await activateRuntimeStorage(localStorage.getItem('training-tracker-state'),localStorage);}catch(e){code=e.code;}
+    TrainingDatabase.prototype.read=original;
+    return {code,inactive:await openRuntimeStorage(localStorage)===null};
+  });
+  assert.deepEqual(result,{code:'ROUND_TRIP_FAILED',inactive:true});assert.equal(await legacy(p),before);
+}));
 const flush=p=>p.evaluate(()=>flushTrainingStorage());
 async function reload(p){await p.reload();await p.waitForFunction(()=>window.trainingAppReady);}
 async function weight(p,value='60'){
@@ -237,4 +372,39 @@ test('SQ3 rejected async database save does not stop row clock or claim saved',(
   await p.waitForFunction(()=>document.getElementById('storageSaveStatus').textContent.includes('本组记录未保存'));
   await p.waitForFunction(id=>document.getElementById('mt_'+id).textContent==='02:58',id);
   assert.equal(await disk(p),before);await p.evaluate(()=>pauseTimer());
+}));
+test('SQ4 switching full localStorage to IndexedDB preserves ROOT; nutrition and weights can save',()=>withPage(async p=>{
+  const before=await legacy(p);await rejectLocalWrites(p);await activate(p);assert.equal(await disk(p),before);
+  await rejectLocalWrites(p);
+  const canonical=await p.evaluate(()=>JSON.stringify(state.days)),logs=await p.evaluate(()=>JSON.stringify(state.workoutLogs));
+  await weight(p,'62.5');await p.evaluate(()=>showTab('nutrition'));
+  await p.locator('[data-n-action="new-cycle"]').tap();
+  const form=p.locator('#nutritionCycleForm');await form.locator('[name="cycleName"]').fill('匿名存储容量测试');
+  const beforeInvalid=await disk(p);
+  await form.locator('[type="submit"]').tap();
+  await p.waitForFunction(()=>document.getElementById('nutritionStatus').textContent.includes('请至少添加一种食品或饮品'));
+  assert.equal(await disk(p),beforeInvalid);
+  assert.equal(await p.evaluate(()=>trainingStorageBackend.pending),0);
+  assert.equal(await p.evaluate(()=>trainingStorageBackend.failure),null);
+  await form.locator('[data-n-action="add-food"]').first().tap();
+  await form.locator('fieldset [name="name"]').fill('匿名食品');
+  await form.locator('fieldset [name="quantity"]').fill('100');
+  await form.locator('[type="submit"]').tap();await p.waitForFunction(()=>document.getElementById('nutritionStatus').textContent==='已保存');
+  const stored=JSON.parse(await disk(p));
+  assert.equal(stored.profiles[stored.activeProfileId].nutrition.cycles[0].name,'匿名存储容量测试');
+  assert.equal(stored.profiles[stored.activeProfileId].nutrition.cycles[0].meals[0].foods[0].quantity,100);
+  assert.equal(await p.evaluate(()=>JSON.stringify(state.days)),canonical);assert.equal(await p.evaluate(()=>JSON.stringify(state.workoutLogs)),logs);
+  assert.equal(await legacy(p),before);await reload(p);
+  assert.equal(await p.locator('#exercises .setrow').first().locator('[data-field="weight"]').inputValue(),'62.5');
+  assert.equal(await p.evaluate(()=>getActiveProfile().nutrition.cycles[0].name),'匿名存储容量测试');
+}));
+test('SQ5 recovery export retains raw DOM values separately without saving or making a log',()=>withPage(async p=>{
+  const before=await legacy(p),runtime=await p.evaluate(()=>JSON.stringify(trainingTrackerState));
+  await p.evaluate(()=>{document.querySelector('#exercises [data-field="weight"]').value='67.5';document.getElementById('sessionNote').value='未保存备注';});
+  const downloading=p.waitForEvent('download');await p.evaluate(()=>exportUnsavedTrainingState());const download=await downloading;
+  const backup=JSON.parse(fs.readFileSync(await download.path(),'utf8'));
+  assert.equal(JSON.stringify(backup.state),runtime);
+  assert.ok(backup.pageRecovery.inputs.some(i=>i.field==='weight'&&i.value==='67.5'&&i.setId));
+  assert.ok(backup.pageRecovery.inputs.some(i=>i.id==='sessionNote'&&i.value==='未保存备注'));
+  assert.equal(await legacy(p),before);assert.equal(await p.evaluate(()=>JSON.stringify(trainingTrackerState)),runtime);
 }));

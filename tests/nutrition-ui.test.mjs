@@ -18,9 +18,25 @@ async function run(fn){
   const context=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true,acceptDownloads:true});
   await context.route('https://cdn.jsdelivr.net/**',r=>r.fulfill({body:'',contentType:'application/javascript'}));
   await context.addInitScript(root=>{if(!localStorage.getItem('training-tracker-state'))localStorage.setItem('training-tracker-state',JSON.stringify(root));},demoRoot());
-  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+  let cancelMigration=false;
+  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>cancelMigration&&d.type()==='confirm'?d.dismiss():d.accept());
   try{
-    await page.goto(url);await page.waitForFunction(()=>window.trainingAppReady);await page.evaluate(()=>showTab('settings'));await page.locator('#activateStorage').tap();await page.waitForFunction(()=>!!trainingStorageBackend&&document.getElementById('storageBusy').hidden);
+    await page.goto(url);await page.waitForFunction(()=>window.trainingAppReady);await page.evaluate(()=>showTab('settings'));
+    const oldRoot=await page.evaluate(()=>localStorage.getItem('training-tracker-state'));
+    const downloaded=page.waitForEvent('download');await page.locator('#activateStorage').tap();
+    const rescue=JSON.parse(fs.readFileSync(await (await downloaded).path(),'utf8'));assert.equal(rescue.rootRaw,oldRoot);
+    const inactive=()=>page.evaluate(async()=>{
+      const {TrainingDatabase}=await import('/storage-v2/database.mjs?v='+window.APP_BUILD_VERSION);const db=new TrainingDatabase('training-tracker-data');
+      try{return !window.trainingStorageBackend&&!await db.status()&&!await db.db.metadata.get('activation');}finally{db.close();}
+    });
+    assert.equal(await inactive(),true);assert.equal(await page.evaluate(()=>localStorage.getItem('training-tracker-state')),oldRoot);
+    cancelMigration=true;await page.locator('#activateStorage').tap();
+    assert.equal(await inactive(),true);assert.equal(await page.evaluate(()=>localStorage.getItem('training-tracker-state')),oldRoot);
+    cancelMigration=false;
+    await Promise.all([page.waitForEvent('load'),page.locator('#activateStorage').tap()]);await page.waitForFunction(()=>window.trainingAppReady);
+    await page.waitForFunction(()=>!!trainingStorageBackend&&document.getElementById('storageBusy').hidden);
+    assert.equal(await page.evaluate(async()=>JSON.stringify((await trainingStorageBackend.database.read()).root)),oldRoot);
+    assert.equal(await page.evaluate(()=>localStorage.getItem('training-tracker-state')),oldRoot);
     await page.locator('.mobileDock [data-tab="nutrition"]').tap();await page.locator('#nutritionDate').fill('2026-10-06');
     await fn(page);assert.deepEqual(errors,[]);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   }finally{await context.close();}

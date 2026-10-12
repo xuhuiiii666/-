@@ -1,8 +1,8 @@
-import {openRuntimeStorage, activateRuntimeStorage, DATABASE_NAME} from './runtime.mjs?v=20261007-working-set-reference-1';
-import {TrainingDatabase} from './database.mjs';
+import {openRuntimeStorage, activateRuntimeStorage, DATABASE_NAME} from './runtime.mjs?v=20261012-indexeddb-guarded-release-1';
+import {TrainingDatabase} from './database.mjs?v=20261012-indexeddb-guarded-release-1';
 
 const $ = id => document.getElementById(id);
-let ready = false, busy = 0;
+let ready = false, busy = 0, preparedRecovery = null;
 function status(event) {
   const box = $('storageSaveStatus'); if (!box) return;
   box.hidden = false;
@@ -37,17 +37,35 @@ function download(text, name) {
 }
 window.activateNewTrainingStorage = async function() {
   if (busy || window.trainingStorageBackend) return;
-  if (!confirm('将下载原始备份，然后复制并切换到本机数据库。请确认备份下载成功，并关闭其他旧版训练器页面。旧存档不会删除。继续？')) return;
+  const raw = localStorage.getItem('training-tracker-state');
+  if (!raw) { window.reportStorageActionError(new Error('没有可验证的原始 ROOT，未切换。')); return; }
+  const recovery = buildPageRecoverySnapshot();
+  const signature = JSON.stringify({raw,state:recovery.state,pageRecovery:recovery.pageRecovery});
+  if (preparedRecovery !== signature) {
+    download(JSON.stringify({...recovery,rootRaw:raw},null,2),'训练器-迁移前独立救援副本.json');
+    preparedRecovery = signature;
+    alert('尚未迁移。请先确认救援文件已保存且可打开，再点击本按钮。文件包含原始 ROOT 和未保存页面输入；未确认的输入不会自动恢复。');
+    return;
+  }
+  if (!confirm('确认独立救援文件已保存且可打开，并已关闭其他训练器标签页？继续后将只复制已保存 ROOT，重新加载其验证副本；未保存输入留在救援文件中，需另行确认恢复。')) return;
+  let committed = false;
+  window.trainingStorageMigrationInProgress = true;
   window.setStorageOperationBusy(true);
   try {
-    const raw = localStorage.getItem('training-tracker-state') || JSON.stringify(window.trainingTrackerState);
-    download(raw,'训练器-切换前原始存档.json');
-    window.trainingStorageBackend = await activateRuntimeStorage(raw,localStorage,status);
-    window.trainingStorageBackend.emit();
-    window.refreshStorageMode(); window.renderSettings();
-    alert('已核对并切换到本机数据库。原计划、记录和 ID 保留，旧存档未删除。');
+    const backend = await activateRuntimeStorage(raw,localStorage,status);
+    committed = true;
+    backend.database.close();
+    // Reload removes both stale runtime aliases and stale DOM inputs before any save.
+    ready = false;
+    updateLock();
+    location.reload();
   } catch (error) { window.reportStorageActionError(error); }
-  finally { window.setStorageOperationBusy(false); }
+  finally {
+    if (!committed) {
+      window.trainingStorageMigrationInProgress = false;
+      window.setStorageOperationBusy(false);
+    }
+  }
 };
 window.retryTrainingStorage = async function() {
   if (!window.trainingStorageBackend || busy) return;
@@ -57,8 +75,20 @@ window.retryTrainingStorage = async function() {
   finally { window.setStorageOperationBusy(false); }
 };
 window.exportUnsavedTrainingState = function() {
-  if (window.trainingTrackerState) download(JSON.stringify({app:'training-tracker',version:6,state:window.trainingTrackerState},null,2),'训练器-未保存页面数据.json');
+  if (window.trainingTrackerState) download(JSON.stringify(buildPageRecoverySnapshot(),null,2),'训练器-未保存页面数据.json');
 };
+function buildPageRecoverySnapshot() {
+  // Preserve visible inputs separately without turning a reference into execution data.
+  const inputs=[...document.querySelectorAll('#exercises input,#exercises select,#exercises textarea,#warmupExercises input,#warmupExercises select,#warmupExercises textarea,#nutrition input,#nutrition select,#nutrition textarea,#sessionNote,#floatingSessionNote')].map(node=>({
+    id:node.id,name:node.name,field:node.dataset.field||'',value:node.value,
+    setId:node.closest('[data-set-id]')?.dataset.setId||'',
+    exerciseId:node.closest('[data-card-id]')?.dataset.cardId||'',
+    reference:node.closest('[data-history-weight-reference]')?.dataset.historyWeightReference||'',
+    completed:node.closest('.setrow')?.classList.contains('done')||false
+  }));
+  return {app:'training-tracker',version:6,exportedAt:new Date().toISOString(),state:window.trainingTrackerState,
+    pageRecovery:{workoutId:window.state?.currentWorkoutId||'',inputs,nutritionHTML:document.getElementById('nutrition')?.innerHTML||''}};
+}
 window.exportLegacyRootSnapshot = function() {
   const raw=localStorage.getItem('training-tracker-state');
   if(raw===null){alert('没有旧版原始存档。');return;}

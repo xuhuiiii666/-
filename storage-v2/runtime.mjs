@@ -1,5 +1,5 @@
-import {TrainingDatabase} from './database.mjs';
-import {ROOT_KEY, sha256, StorageV2Error} from './state-codec.mjs';
+import {TrainingDatabase} from './database.mjs?v=20261012-indexeddb-guarded-release-1';
+import {ROOT_KEY, sha256, parseSource, StorageV2Error} from './state-codec.mjs?v=20261012-indexeddb-guarded-release-1';
 
 export const DATABASE_NAME = 'training-tracker-data';
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -13,7 +13,7 @@ export class RuntimeStorage {
   async checkSource() {
     const raw = this.source.getItem(ROOT_KEY);
     const fingerprint = raw === null ? null : await sha256(raw);
-    if (fingerprint !== this.activation.legacyHash) throw new StorageV2Error('LEGACY_CHANGED', '旧页面修改了升级前存档。已停止保存，请先导出当前数据和旧存档，再检查两份记录。');
+    if (fingerprint !== this.activation.legacyHash) throw new StorageV2Error('LEGACY_CHANGED', '旧页面修改了升级前存档，已停止保存。请先导出当前数据和旧存档，关闭其他旧页面并重新打开。冲突仍需人工核对，不会自动覆盖任一副本。');
   }
   save(root) {
     const candidate = clone(root);
@@ -56,11 +56,19 @@ export async function openRuntimeStorage(source, notify) {
 
 export async function activateRuntimeStorage(raw, source, notify) {
   const database = new TrainingDatabase(DATABASE_NAME), before = source.getItem(ROOT_KEY);
+  try {
   if(before!==null&&before!==raw)throw new StorageV2Error('LEGACY_CHANGED','原存档已经变化，本次未切换。请重新备份后再试。');
   const activation = {legacyHash:before === null ? null : await sha256(before), activatedAt:new Date().toISOString()};
-  await database.stageSource(raw, {activation, beforeCommit() {
+  const checkSource = () => {
     if (source.getItem(ROOT_KEY) !== before) throw new StorageV2Error('LEGACY_CHANGED','复制期间原存档发生变化，本次未切换。请重新备份后再试。');
-  }});
+  };
+  await database.stageSource(raw, {beforeCommit:checkSource});
   const snapshot = await database.read();
-  return new RuntimeStorage(database, source, snapshot, activation, notify);
+  if (!snapshot || JSON.stringify(snapshot.root) !== JSON.stringify(parseSource(raw))) {
+    throw new StorageV2Error('ROUND_TRIP_FAILED','复制后的读取结果与原始 ROOT 不一致，未切换。');
+  }
+  const runtime = new RuntimeStorage(database, source, snapshot, activation, notify);
+  await database.activateVerified(snapshot, activation, checkSource);
+  return runtime;
+  } catch(error) { database.close(); throw error; }
 }

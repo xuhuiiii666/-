@@ -1,5 +1,5 @@
-import Dexie from './vendor/dist/dexie.mjs';
-import {LAYOUT_VERSION, ROOT_KEY, StorageV2Error, inspectSource, encodeRoot, decodeRoot, sha256} from './state-codec.mjs';
+import Dexie from './vendor/dist/dexie.mjs?v=20261012-indexeddb-guarded-release-1';
+import {LAYOUT_VERSION, ROOT_KEY, StorageV2Error, inspectSource, encodeRoot, decodeRoot, sha256} from './state-codec.mjs?v=20261012-indexeddb-guarded-release-1';
 
 // The laboratory defaults to a separate database. Runtime activation explicitly
 // uses training-tracker-data and leaves the original localStorage root intact.
@@ -60,16 +60,29 @@ export class TrainingDatabase {
     });
   }
 
+  async activateVerified(snapshot, activation, checkSource) {
+    return this.db.transaction('rw', this.db.documents, this.db.metadata, async () => {
+      const manifest = await this.db.metadata.get('manifest');
+      if (!snapshot || !manifest || manifest.revision !== snapshot.revision || manifest.fingerprint !== snapshot.fingerprint) {
+        throw new StorageV2Error('REVISION_CONFLICT','验证副本已变化，未切换。');
+      }
+      const root = decodeRoot(manifest.tree, await this.db.documents.toArray());
+      if (JSON.stringify(root) !== JSON.stringify(snapshot.root)) throw new StorageV2Error('HASH_MISMATCH','切换前内容比对失败，未切换。');
+      checkSource();
+      await this.db.metadata.put({key:'activation', ...activation});
+    });
+  }
+
   // All callers must await this commit before acknowledging a successful save.
   // Optimistic revision checks prevent two tabs silently overwriting each other.
   async commit(root, expectedRevision) {
     if (!Number.isInteger(expectedRevision) || expectedRevision < 1) throw new StorageV2Error('REVISION_REQUIRED', '保存必须提供已读取的版本。');
     const previous = await this.read();
-    if (!previous || previous.revision !== expectedRevision) throw new StorageV2Error('REVISION_CONFLICT', '记录已更新，请重新读取后再保存。');
+    if (!previous || previous.revision !== expectedRevision) throw new StorageV2Error('REVISION_CONFLICT', '记录已更新，本次未保存。请先导出未保存输入，关闭其他旧页面并重新打开，核对后再保存。');
     const encoded = encodeRoot(root), fingerprint = await sha256(encoded.json);
     return this.db.transaction('rw', this.db.documents, this.db.metadata, async () => {
       const current = await this.db.metadata.get('manifest');
-      if (!current || current.revision !== expectedRevision) throw new StorageV2Error('REVISION_CONFLICT', '记录已由另一个页面更新，本次没有覆盖。请重新读取后再保存。');
+      if (!current || current.revision !== expectedRevision) throw new StorageV2Error('REVISION_CONFLICT', '记录已由另一个页面更新，本次没有覆盖。请先导出未保存输入，关闭其他旧页面并重新打开，核对后再保存。');
       const existing = await this.db.documents.toArray();
       const restored = decodeRoot(current.tree, existing);
       if (JSON.stringify(restored) !== JSON.stringify(previous.root)) throw new StorageV2Error('HASH_MISMATCH', '存储在校验后发生变化，未保存。');

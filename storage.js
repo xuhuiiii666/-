@@ -361,6 +361,7 @@
     return program;
   }
   function saveRoot(root,options){
+    if(global.trainingStorageMigrationInProgress)throw new Error('正在切换存储，训练数据暂不保存。请等待页面重新加载。');
     options=options||{};
     root=root||global.trainingTrackerState;
     if(!root) return null;
