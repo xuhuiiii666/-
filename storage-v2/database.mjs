@@ -1,5 +1,5 @@
-import Dexie from './vendor/dist/dexie.mjs?v=20261012-indexeddb-guarded-release-1';
-import {LAYOUT_VERSION, ROOT_KEY, StorageV2Error, inspectSource, encodeRoot, decodeRoot, sha256} from './state-codec.mjs?v=20261012-indexeddb-guarded-release-1';
+import Dexie from './vendor/dist/dexie.mjs?v=20261014-planner-name-notes-1';
+import {LAYOUT_VERSION, ROOT_KEY, StorageV2Error, inspectSource, encodeRoot, decodeRoot, sha256} from './state-codec.mjs?v=20261014-planner-name-notes-1';
 
 // The laboratory defaults to a separate database. Runtime activation explicitly
 // uses training-tracker-data and leaves the original localStorage root intact.

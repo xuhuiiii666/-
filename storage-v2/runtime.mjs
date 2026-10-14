@@ -1,5 +1,5 @@
-import {TrainingDatabase} from './database.mjs?v=20261012-indexeddb-guarded-release-1';
-import {ROOT_KEY, sha256, parseSource, StorageV2Error} from './state-codec.mjs?v=20261012-indexeddb-guarded-release-1';
+import {TrainingDatabase} from './database.mjs?v=20261014-planner-name-notes-1';
+import {ROOT_KEY, sha256, parseSource, StorageV2Error} from './state-codec.mjs?v=20261014-planner-name-notes-1';
 
 export const DATABASE_NAME = 'training-tracker-data';
 const clone = value => JSON.parse(JSON.stringify(value));

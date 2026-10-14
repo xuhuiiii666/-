@@ -1,5 +1,5 @@
-import {openRuntimeStorage, activateRuntimeStorage, DATABASE_NAME} from './runtime.mjs?v=20261012-indexeddb-guarded-release-1';
-import {TrainingDatabase} from './database.mjs?v=20261012-indexeddb-guarded-release-1';
+import {openRuntimeStorage, activateRuntimeStorage, DATABASE_NAME} from './runtime.mjs?v=20261014-planner-name-notes-1';
+import {TrainingDatabase} from './database.mjs?v=20261014-planner-name-notes-1';
 
 const $ = id => document.getElementById(id);
 let ready = false, busy = 0, preparedRecovery = null;

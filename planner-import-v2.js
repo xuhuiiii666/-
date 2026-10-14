@@ -51,6 +51,31 @@
   var VERSION_PATTERN=/^\d+\.\d+(?:\.\d+)?$/;
 
   function text(value){return String(value===undefined||value===null?'':value).trim();}
+  function exerciseNameParts(value,note){
+    var source=text(value),base='',parts=[],stack=[],start=-1,close={'(' : ')','（':'）','【':'】'};
+    for(var i=0;i<source.length;i++){
+      var char=source[i];
+      if(close[char]){if(!stack.length)start=i;stack.push(close[char]);}
+      else if(char===')'||char==='）'||char==='】'){
+        if(!stack.length||stack.pop()!==char)return {error:'动作名称括号不配对，请人工确认 name/note'};
+        if(!stack.length){var content=source.slice(start+1,i).trim();if(content)parts.push(content);}
+      }else if(!stack.length)base+=char;
+    }
+    if(stack.length)return {error:'动作名称括号不配对，请人工确认 name/note'};
+    base=parts.length?base.replace(/\s+/g,' ').trim():base.trim();
+    if(!base)return {error:'移除括号说明后动作名称为空，请人工确认 name'};
+    var parameter=parts.some(function(part){
+      // Execution tempo is a cue, not the total durationSec prescription.
+      var candidate=part.normalize?part.normalize('NFKC'):part;
+      candidate=candidate.replace(/(?:下降|下放|离心|上推|上升|向心|顶峰|停顿|暂停|收缩)\s*(?:约|至少)?\s*\d+(?:\.\d+)?\s*(?:秒|s)(?![a-z])/gi,'');
+      return /\d+(?:\.\d+)?\s*(?:组|次|kg|lb|公斤|千克|磅|%|秒|分钟|分|s\b|min\b)|\d+\s*[x×*]\s*\d+|RIR\s*\d|余力\s*\d/i.test(candidate);
+    });
+    if(parameter)return {error:'括号包含组数/次数/重量/百分比/时长/RIR，请人工录入组计划_v2 对应字段；未改写训练参数'};
+    var resultNote=text(note),known=resultNote.split(/[；;\n]+/).map(text),added=[];
+    parts.forEach(function(part){if(known.indexOf(part)<0){known.push(part);added.push(part);}});
+    if(added.length)resultNote+=(resultNote?'；':'')+added.join('；');
+    return {name:base,note:resultNote,hasRemarks:parts.length>0};
+  }
   function numberOrNull(value){if(text(value)==='')return null;var number=Number(value);return isFinite(number)?number:null;}
   function copy(value){return value===undefined?undefined:JSON.parse(JSON.stringify(value));}
   function asArray(value){return Array.isArray(value)?value:[];}
@@ -134,7 +159,12 @@
       enumValue(report,row,'workoutType',ENUMS.workoutType,label);optionalPositiveInteger(report,row,'week',label);optionalPositiveInteger(report,row,'dayInWeek',label);optionalNumber(report,row,'targetDurationMin',label,{min:1});
     });
     report.rows.exercises.forEach(function(row){
-      var label='动作第 '+row._row+' 行 ';required(report,row,REQUIRED.exercises,label);assertPlanIdentity(report,row,plan,label);registerKey(report,registry,text(row.exerciseKey),'exerciseKey',label);
+      var nameParts=exerciseNameParts(row.name,row.note);
+      var label='动作第 '+row._row+' 行 ';
+      required(report,Object.assign({},row,{trackingName:text(row.trackingName)||nameParts.name}),REQUIRED.exercises,label);assertPlanIdentity(report,row,plan,label);registerKey(report,registry,text(row.exerciseKey),'exerciseKey',label);
+      if(nameParts.error)report.errors.push(label+nameParts.error);
+      else if(nameParts.hasRemarks)report.warnings.push(label+'括号说明已分离到 note；建议在 Excel 分开填写 name 与 note');
+      if(/[（()）【】]/.test(text(row.trackingName)))report.warnings.push(label+'显式 trackingName 包含括号，已保留原值；请确认这是历史身份而非执行备注');
       if(!workouts[text(row.workoutKey)])report.errors.push(label+'找不到 workoutKey '+text(row.workoutKey));exercises[text(row.exerciseKey)]=row;
       if(!positiveInteger(row.order))report.errors.push(label+'order 必须是正整数');enumValue(report,row,'section',ENUMS.section,label);enumValue(report,row,'trainingRole',ENUMS.trainingRole,label);enumValue(report,row,'exerciseType',ENUMS.exerciseType,label);
       var unit=text(row.unit);if(unit)enumValue(report,row,'unit',ENUMS.weightUnit,label,true);strictBoolean(report,row,'countsAsWorkingSet',label);strictBoolean(report,row,'countsAsHypertrophySet',label);
@@ -214,7 +244,9 @@
       var workoutKey=text(row.workoutKey),workoutId=runtimeId('workout',planKey,workoutKey),plannedDate=text(row.plannedDate),workout={workoutId:workoutId,source:'planner-v2',sourceWorkoutKey:sourceKey(planKey,workoutKey),sourceWorkoutId:workoutKey,plannerWorkoutKey:workoutKey,order:Number(row.order),plannedDate:plannedDate,date:plannedDate,title:text(row.title),'训练主题':text(row.title),'周次':numberOrNull(row.week)||'','周内日':numberOrNull(row.dayInWeek)||'','星期':numberOrNull(row.dayInWeek)||'',workoutType:text(row.workoutType),'类型':text(row.workoutType),'阶段':text(row.workoutType),targetDurationMin:numberOrNull(row.targetDurationMin),note:text(row.note),exercises:[],activities:[],instructions:[],sections:[],supersetRules:[],'导入热身内容':'','热身模板':'—','训练内容（组×次数/余力）':'','组间休息/规则':'按各组处方执行'};
       workout.exercises=asArray(exerciseRows[workoutKey]).sort(function(a,b){return Number(a.order)-Number(b.order);}).map(function(exerciseRow){
         var exerciseKey=text(exerciseRow.exerciseKey),sets=asArray(setRows[exerciseKey]).sort(function(a,b){return Number(a.setNo)-Number(b.setNo);}).map(function(setRow){var segments=asArray(dropRows[text(setRow.setKey)]).sort(function(a,b){return Number(a.segmentOrder)-Number(b.segmentOrder);}).map(function(segment){return segmentEntity(segment,planKey);});return setEntity(setRow,planKey,segments);});
-        var exerciseId=runtimeId('exercise',planKey,exerciseKey),first=sets[0]||{},exercise={exerciseId:exerciseId,sourceExerciseKey:sourceKey(planKey,exerciseKey),plannerExerciseKey:exerciseKey,source:'planner-v2',order:Number(exerciseRow.order),section:text(exerciseRow.section),sectionType:text(exerciseRow.section),trainingRole:text(exerciseRow.trainingRole),exerciseType:text(exerciseRow.exerciseType),name:text(exerciseRow.name),trackingName:text(exerciseRow.trackingName),originalName:text(exerciseRow.name),unit:text(exerciseRow.unit)||text(first.targetWeightUnit)||'kg',supersetKey:text(exerciseRow.supersetKey),supersetOrder:numberOrNull(exerciseRow.supersetOrder),countsAsWorkingSet:booleanValue(exerciseRow.countsAsWorkingSet),countsAsHypertrophySet:booleanValue(exerciseRow.countsAsHypertrophySet),techniqueCue:text(exerciseRow.techniqueCue),note:text(exerciseRow.note),setCount:sets.length,sets:sets,instructions:[],prescription:{repsMin:first.targetRepsMin,repsMax:first.targetRepsMax,rirMin:first.targetRirMin,rirMax:first.targetRirMax,restMin:first.targetRestMin,restMax:first.targetRestMax,recommendedWeight:'',unit:text(exerciseRow.unit)||'kg'}};
+        var nameParts=exerciseNameParts(exerciseRow.name,exerciseRow.note);
+        var trackingName=text(exerciseRow.trackingName)||nameParts.name;
+        var exerciseId=runtimeId('exercise',planKey,exerciseKey),first=sets[0]||{},exercise={exerciseId:exerciseId,sourceExerciseKey:sourceKey(planKey,exerciseKey),plannerExerciseKey:exerciseKey,source:'planner-v2',order:Number(exerciseRow.order),section:text(exerciseRow.section),sectionType:text(exerciseRow.section),trainingRole:text(exerciseRow.trainingRole),exerciseType:text(exerciseRow.exerciseType),name:nameParts.name,trackingName:trackingName,originalName:nameParts.name,unit:text(exerciseRow.unit)||text(first.targetWeightUnit)||'kg',supersetKey:text(exerciseRow.supersetKey),supersetOrder:numberOrNull(exerciseRow.supersetOrder),countsAsWorkingSet:booleanValue(exerciseRow.countsAsWorkingSet),countsAsHypertrophySet:booleanValue(exerciseRow.countsAsHypertrophySet),techniqueCue:text(exerciseRow.techniqueCue),note:nameParts.note,setCount:sets.length,sets:sets,instructions:[],prescription:{repsMin:first.targetRepsMin,repsMax:first.targetRepsMax,rirMin:first.targetRirMin,rirMax:first.targetRirMax,restMin:first.targetRestMin,restMax:first.targetRestMax,recommendedWeight:'',unit:text(exerciseRow.unit)||'kg'}};
         runtimeExercises[exerciseKey]=exercise;return exercise;
       });
       workout.activities=asArray(activityRows[workoutKey]).sort(function(a,b){return Number(a.order)-Number(b.order);}).map(function(activityRow){
