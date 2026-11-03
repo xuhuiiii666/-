@@ -142,6 +142,10 @@ function showTab(id){
   if(id==='settings')renderSettings();
   if(id==='nutrition'&&typeof renderNutrition==='function')renderNutrition();
 }
+function prescriptionRangeText(min,max){
+  if(min===null||min===undefined||min==='')return '';
+  return String(min)+(max!==null&&max!==undefined&&max!==''&&Number(max)!==Number(min)?'–'+max:'');
+}
 function exerciseEntityForRender(entity,index){
   var sets=Array.isArray(entity.sets)?entity.sets:[];
   var prescription=entity.prescription||(typeof normalizeExercisePrescription==='function'?normalizeExercisePrescription(entity):{});
@@ -153,8 +157,8 @@ function exerciseEntityForRender(entity,index){
     line:entity.line||'',
     sets:entity.setCount||sets.length||1,
     setsData:sets,
-    reps:entity.reps||entity.planReps||((sets[0]&&sets[0].reps)||prescription.repsMin||''),
-    rir:entity.rir||entity.planRir||((sets[0]&&sets[0].rir)||prescription.rirMin||''),
+    reps:prescriptionRangeText(prescription.repsMin,prescription.repsMax)||entity.planReps||entity.reps||((sets[0]&&sets[0].reps)||''),
+    rir:prescriptionRangeText(prescription.rirMin,prescription.rirMax)||entity.planRir||entity.rir||((sets[0]&&sets[0].rir)||''),
     duration:entity.duration||((sets[0]&&sets[0].duration)||''),
     suggestedWeight:entity.suggestedWeight||'',
     rest:entity.rest||null,
@@ -1369,8 +1373,9 @@ function mainSetHTML(ei,s,reps,rir,rest,duration,custom,totalSets,setId,setPlan)
     rr.max=Math.max(Number(rr.max||rr.def),rr.def);
   }
   rr.def=Number(rr.def||120)||120;
-  var plannedReps=setPlan.targetRepsMax!==null&&setPlan.targetRepsMax!==undefined?setPlan.targetRepsMax:reps;
-  var plannedRir=setPlan.targetRirMax!==null&&setPlan.targetRirMax!==undefined?setPlan.targetRirMax:rir;
+  var lowerDefaults=setPlan.prescriptionDefined&&(setPlan.setType||'working')==='working'&&!setPlan.loadAdjustmentType&&!(setPlan.segments||[]).length&&!(Number(setPlan.durationTargetSec)>0);
+  var plannedReps=lowerDefaults&&setPlan.targetRepsMin!==null&&setPlan.targetRepsMin!==undefined?setPlan.targetRepsMin:setPlan.targetRepsMax!==null&&setPlan.targetRepsMax!==undefined?setPlan.targetRepsMax:reps;
+  var plannedRir=lowerDefaults&&setPlan.targetRirMin!==null&&setPlan.targetRirMin!==undefined?setPlan.targetRirMin:setPlan.targetRirMax!==null&&setPlan.targetRirMax!==undefined?setPlan.targetRirMax:rir;
   var actualReps=String(setPlan.reps==null?'':setPlan.reps);
   var cleanReps=/^\d+(?:\.\d+)?$/.test(actualReps)?actualReps:(String(plannedReps||'').split(/[–\-~至]/).pop()||'');
   var totalTxt=totalSets?('/'+totalSets):'';
@@ -1385,7 +1390,7 @@ function mainSetHTML(ei,s,reps,rir,rest,duration,custom,totalSets,setId,setPlan)
       <span class="op">×</span>
       <input data-ex="${custom?'custom_'+ei:ei}" data-set="${s}" data-field="reps" placeholder="次数" type="number" step="1" value="${escapeHtml(cleanReps)}">
       <span class="op">-</span>
-      <input data-ex="${custom?'custom_'+ei:ei}" data-set="${s}" data-field="rir" placeholder="余力" value="${escapeHtml(setPlan.rir!==undefined&&setPlan.rir!==''?setPlan.rir:(plannedRir||''))}">
+      <input data-ex="${custom?'custom_'+ei:ei}" data-set="${s}" data-field="rir" placeholder="余力" value="${escapeHtml(setPlan.rir!==undefined&&setPlan.rir!==null&&setPlan.rir!==''?setPlan.rir:(plannedRir===0?'0':plannedRir||''))}">
     </div>
     ${durationControlHTML(id,duration||'')}
     <div class="row" style="gap:6px">${restControlHTML(id,rr)}<button class="delBtn" onclick="removeMainSet(this)">删除这一组</button></div>
